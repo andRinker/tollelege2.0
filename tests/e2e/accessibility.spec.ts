@@ -11,8 +11,8 @@ async function expectNoSeriousViolations(page: Page, name: string) {
   expect.soft(serious, `${name} accessibility violations`).toEqual([]);
 }
 
-test("sign-in and sign-up pages have no serious accessibility violations", async ({ page }) => {
-  for (const path of ["/sign-in", "/sign-up", "/forgot-password"]) {
+test("public pages have no serious accessibility violations", async ({ page }) => {
+  for (const path of ["/sign-in", "/sign-up", "/forgot-password", "/privacy"]) {
     await page.goto(path);
     await page.waitForLoadState("networkidle");
     await expectNoSeriousViolations(page, path);

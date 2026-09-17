@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { APP_DESCRIPTION, APP_TAGLINE } from "@/lib/brand";
 import { BrandMark } from "@/ui/components/brand";
+import { TextLink } from "@/ui/components/text-link";
 import { Shape } from "@/ui/components/expressive";
 
 export default function AuthLayout({ children }: { children: ReactNode }) {
@@ -30,9 +31,14 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
           <p className="text-title-md text-on-primary-container">{APP_DESCRIPTION}</p>
         </div>
       </aside>
-      <main className="flex items-center justify-center px-4 py-10 medium:px-10">
-        <div className="w-full max-w-[420px]">{children}</div>
-      </main>
+      <div className="flex flex-col">
+        <main className="flex grow items-center justify-center px-4 py-10 medium:px-10">
+          <div className="w-full max-w-[420px]">{children}</div>
+        </main>
+        <footer className="px-4 pb-6 text-center text-body-sm text-on-surface-variant">
+          <TextLink href="/privacy">Privacy</TextLink>
+        </footer>
+      </div>
     </div>
   );
 }

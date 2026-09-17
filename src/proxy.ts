@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 // Pages anyone can open. This is only an optimistic redirect based on cookie presence;
 // pages, layouts, and server actions verify the session with requireTeacher().
-const PUBLIC_PREFIXES = ["/sign-in", "/sign-up", "/forgot-password", "/reset-password", "/design"];
+const PUBLIC_PREFIXES = ["/sign-in", "/sign-up", "/forgot-password", "/reset-password", "/privacy", "/design"];
 
 export function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;

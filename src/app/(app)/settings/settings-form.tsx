@@ -13,6 +13,7 @@ import { Icon } from "@/ui/components/icon";
 import { ListBoxItem } from "@/ui/components/menu";
 import { ComboBox, Select } from "@/ui/components/select";
 import { useSnackbar } from "@/ui/components/snackbar";
+import { TextLink } from "@/ui/components/text-link";
 import {
   iconCheck,
   iconContrast,
@@ -229,6 +230,9 @@ export function SettingsForm({ settings, teacher, timeZones }: Props) {
             <div className="flex flex-col">
               <span className="text-title-md">{teacher.name}</span>
               <span className="text-body-md text-on-surface-variant">{teacher.email}</span>
+              <TextLink href="/privacy" className="mt-2 self-start text-body-md">
+                How your data is handled
+              </TextLink>
             </div>
             <Button
               variant="outlined"
