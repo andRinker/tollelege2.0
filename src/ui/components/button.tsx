@@ -33,6 +33,12 @@ export const BUTTON_SIZES: Record<
 const BASE =
   "state-layer focus-ring shape-morph touch-target relative inline-flex shrink-0 cursor-pointer select-none items-center justify-center whitespace-nowrap px-(--btn-pad) data-[disabled]:cursor-default";
 
+// Applied with `compact`: small-size tokens below 600px. Important overrides beat the inline size variables.
+const COMPACT_ROUND =
+  "max-medium:h-10 max-medium:gap-2 max-medium:text-label-lg max-medium:[--btn-pad:16px]! max-medium:[--shape-rest:20px]! max-medium:[--shape-selected:12px]! max-medium:[--shape-pressed:8px]! max-medium:[&_svg]:size-5";
+const COMPACT_SQUARE =
+  "max-medium:h-10 max-medium:gap-2 max-medium:text-label-lg max-medium:[--btn-pad:16px]! max-medium:[--shape-rest:12px]! max-medium:[--shape-selected:20px]! max-medium:[--shape-pressed:8px]! max-medium:[&_svg]:size-5";
+
 const DISABLED_FILL = "data-[disabled]:bg-on-surface/10 data-[disabled]:text-on-surface/38 data-[disabled]:shadow-none";
 
 const VARIANTS: Record<ButtonVariant, string> = {
@@ -67,6 +73,8 @@ export function buttonShapeStyle(size: ButtonSize, shape: ButtonShape): CSSPrope
 
 type CommonProps = {
   size?: ButtonSize;
+  /** Use the small size on phones. */
+  compact?: boolean;
   shape?: ButtonShape;
   icon?: IconData;
   trailingIcon?: IconData;
@@ -103,6 +111,7 @@ export type ButtonProps = CommonProps &
 export function Button({
   variant = "filled",
   size = "sm",
+  compact = false,
   shape = "round",
   icon,
   trailingIcon,
@@ -114,7 +123,7 @@ export function Button({
   return (
     <AriaButton
       {...props}
-      className={cx(BASE, BUTTON_SIZES[size].box, variant === "outlined" && BUTTON_SIZES[size].border, VARIANTS[variant], className)}
+      className={cx(BASE, BUTTON_SIZES[size].box, variant === "outlined" && BUTTON_SIZES[size].border, VARIANTS[variant], compact && (shape === "round" ? COMPACT_ROUND : COMPACT_SQUARE), className)}
       style={{ ...buttonShapeStyle(size, shape), ...style }}
     >
       {({ isPending }) => (
@@ -132,6 +141,7 @@ export type LinkButtonProps = CommonProps &
 export function LinkButton({
   variant = "filled",
   size = "sm",
+  compact = false,
   shape = "round",
   icon,
   trailingIcon,
@@ -143,7 +153,7 @@ export function LinkButton({
   return (
     <AriaLink
       {...props}
-      className={cx(BASE, BUTTON_SIZES[size].box, variant === "outlined" && BUTTON_SIZES[size].border, VARIANTS[variant], className)}
+      className={cx(BASE, BUTTON_SIZES[size].box, variant === "outlined" && BUTTON_SIZES[size].border, VARIANTS[variant], compact && (shape === "round" ? COMPACT_ROUND : COMPACT_SQUARE), className)}
       style={{ ...buttonShapeStyle(size, shape), ...style }}
     >
       <Content size={size} icon={icon} trailingIcon={trailingIcon}>
@@ -159,6 +169,7 @@ export type ToggleButtonProps = CommonProps &
 export function ToggleButton({
   variant = "filled",
   size = "sm",
+  compact = false,
   shape = "round",
   icon,
   trailingIcon,
@@ -170,7 +181,7 @@ export function ToggleButton({
   return (
     <AriaToggleButton
       {...props}
-      className={cx(BASE, BUTTON_SIZES[size].box, variant === "outlined" && BUTTON_SIZES[size].border, TOGGLE_VARIANTS[variant], className)}
+      className={cx(BASE, BUTTON_SIZES[size].box, variant === "outlined" && BUTTON_SIZES[size].border, TOGGLE_VARIANTS[variant], compact && (shape === "round" ? COMPACT_ROUND : COMPACT_SQUARE), className)}
       style={{ ...buttonShapeStyle(size, shape), ...style }}
     >
       {({ isSelected }) => (

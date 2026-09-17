@@ -51,8 +51,13 @@ const TOGGLE_VARIANTS: Record<IconButtonVariant, string> = {
     "border-outline-variant text-on-surface-variant data-[selected]:border-inverse-surface data-[selected]:bg-inverse-surface data-[selected]:text-inverse-on-surface data-[disabled]:border-on-surface/12 data-[disabled]:text-on-surface/38",
 };
 
+const COMPACT =
+  "max-medium:h-10 max-medium:[--btn-w:40px]! max-medium:[--shape-rest:20px]! max-medium:[--shape-selected:12px]! max-medium:[--shape-pressed:8px]!";
+
 type CommonProps = {
   icon: IconData;
+  /** Use the small size on phones. */
+  compact?: boolean;
   /** Accessible name. Also shown as a tooltip unless `tooltip` is false. */
   label: string;
   tooltip?: boolean;
@@ -63,11 +68,12 @@ type CommonProps = {
   className?: string;
 };
 
-function classes({ variant = "standard", size = "sm" }: CommonProps, toggle: boolean) {
+function classes({ variant = "standard", size = "sm", compact = false }: CommonProps, toggle: boolean) {
   const tokens = SIZES[size];
   return cx(
     BASE,
     tokens.height,
+    compact && COMPACT,
     variant === "outlined" && tokens.border,
     (toggle ? TOGGLE_VARIANTS : VARIANTS)[variant],
   );
@@ -95,8 +101,8 @@ function withTooltip(label: string, enabled: boolean | undefined, element: React
 
 export type IconButtonProps = CommonProps & Omit<AriaButtonProps, "className" | "style" | "children">;
 
-export function IconButton({ icon, label, tooltip, variant, size = "sm", width, shape, className, ...rest }: IconButtonProps) {
-  const tokens = { icon, label, variant, size, width, shape };
+export function IconButton({ icon, label, tooltip, variant, size = "sm", width, shape, compact, className, ...rest }: IconButtonProps) {
+  const tokens = { icon, label, variant, size, width, shape, compact };
   return withTooltip(
     label,
     tooltip,
@@ -115,8 +121,8 @@ export function IconButton({ icon, label, tooltip, variant, size = "sm", width, 
 
 export type LinkIconButtonProps = CommonProps & Omit<AriaLinkProps, "className" | "style" | "children">;
 
-export function LinkIconButton({ icon, label, tooltip, variant, size = "sm", width, shape, className, ...rest }: LinkIconButtonProps) {
-  const tokens = { icon, label, variant, size, width, shape };
+export function LinkIconButton({ icon, label, tooltip, variant, size = "sm", width, shape, compact, className, ...rest }: LinkIconButtonProps) {
+  const tokens = { icon, label, variant, size, width, shape, compact };
   return withTooltip(
     label,
     tooltip,
@@ -128,8 +134,8 @@ export function LinkIconButton({ icon, label, tooltip, variant, size = "sm", wid
 
 export type ToggleIconButtonProps = CommonProps & Omit<AriaToggleButtonProps, "className" | "style" | "children">;
 
-export function ToggleIconButton({ icon, label, tooltip, variant, size = "sm", width, shape, className, ...rest }: ToggleIconButtonProps) {
-  const tokens = { icon, label, variant, size, width, shape };
+export function ToggleIconButton({ icon, label, tooltip, variant, size = "sm", width, shape, compact, className, ...rest }: ToggleIconButtonProps) {
+  const tokens = { icon, label, variant, size, width, shape, compact };
   return withTooltip(
     label,
     tooltip,

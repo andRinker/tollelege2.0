@@ -63,11 +63,11 @@ export function BookActions({
 
   return (
     <>
-      <Button variant="tonal" size="md" icon={iconEdit} onPress={() => setEditing(bookFormFromBook(book))}>
+      <Button variant="tonal" size="md" compact icon={iconEdit} onPress={() => setEditing(bookFormFromBook(book))}>
         Edit details
       </Button>
       <MenuTrigger>
-        <IconButton icon={iconMoreVert} label="More actions" size="md" variant="standard" />
+        <IconButton icon={iconMoreVert} label="More actions" size="md" compact variant="standard" />
         <Menu onAction={(key) => key === "delete" && setConfirmDelete(true)}>
           <MenuItem id="delete" icon={iconDelete} destructive>
             Delete book
