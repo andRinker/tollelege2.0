@@ -22,7 +22,14 @@ import { checkInByIsbnAction, type IsbnCheckInResult, undoCheckInAction } from "
 
 type Choice = Extract<IsbnCheckInResult, { status: "choose" }>;
 
-export function CheckinFlow({ loans, today, timeZone }: { loans: OpenLoan[]; today: string; timeZone: string | null }) {
+type Props = {
+  loans: OpenLoan[];
+  today: string;
+  timeZone: string | null;
+  initialFilter: "all" | "overdue";
+};
+
+export function CheckinFlow({ loans, today, timeZone, initialFilter }: Props) {
   const showSnackbar = useSnackbar();
   const returnBook = useReturnWithUndo();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -32,7 +39,7 @@ export function CheckinFlow({ loans, today, timeZone }: { loans: OpenLoan[]; tod
   const [choice, setChoice] = useState<Choice | null>(null);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [lastReturn, setLastReturn] = useState<string | null>(null);
-  const [filter, setFilter] = useState<"all" | "overdue">("all");
+  const [filter, setFilter] = useState(initialFilter);
   const [query, setQuery] = useState("");
 
   const overdueCount = loans.filter((loan) => loan.overdue).length;

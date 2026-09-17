@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { addDays, daysBetween, describeDueDate, formatCalendarDate, isOverdue, schoolYearLabel, todayInTimeZone } from "@/lib/dates";
+import {
+  addDays,
+  daysBetween,
+  describeDueDate,
+  formatCalendarDate,
+  formatRecentInstant,
+  hourInTimeZone,
+  isOverdue,
+  schoolYearLabel,
+  todayInTimeZone,
+} from "@/lib/dates";
 
 describe("dates", () => {
   it("computes today in the teacher's time zone, not the server's", () => {
@@ -41,5 +51,16 @@ describe("dates", () => {
     expect(schoolYearLabel("2026-09-16")).toBe("2026–27");
     expect(schoolYearLabel("2027-03-01")).toBe("2026–27");
     expect(schoolYearLabel("2027-07-01")).toBe("2027–28");
+  });
+
+  it("reads the clock and recent times in the teacher's time zone", () => {
+    const instant = new Date("2026-09-17T02:30:00Z");
+    expect(hourInTimeZone("America/Chicago", instant)).toBe(21);
+    expect(hourInTimeZone("UTC", instant)).toBe(2);
+    expect(hourInTimeZone("Pacific/Auckland", new Date("2026-09-17T11:05:00Z"))).toBe(23);
+
+    expect(formatRecentInstant(instant, "America/Chicago", "2026-09-16")).toBe("9:30 PM");
+    expect(formatRecentInstant(instant, "America/Chicago", "2026-09-17")).toBe("Yesterday");
+    expect(formatRecentInstant(instant, "America/Chicago", "2026-09-25")).toBe("Sep 16");
   });
 });

@@ -14,6 +14,7 @@ import {
   importStudents,
   listClasses,
   moveStudents,
+  rosterCounts,
   setClassArchived,
   setStudentActive,
   updateClass,
@@ -153,5 +154,19 @@ describe("rosters", () => {
 
     expect(await findStudents(db, otherTeacher, { today: TODAY, query: "Violet" })).toEqual([]);
     expect((await listClasses(db, otherTeacher, TODAY)).map((c) => c.name)).toEqual(["Their class"]);
+  });
+
+  it("counts active students and current classes for the dashboard", async () => {
+    const newTeacher = await createTeacher(db, "Mr. Chips");
+    expect(await rosterCounts(db, newTeacher)).toEqual({ students: 0, classes: 0 });
+
+    const current = await createClass(db, newTeacher, { name: "Latin I", schoolYear: "2026–27" });
+    const old = await createClass(db, newTeacher, { name: "Latin I", schoolYear: "2025–26" });
+    await setClassArchived(db, newTeacher, old.id, true);
+    await addStudent(db, newTeacher, current.id, { firstName: "Peter", lastName: "Colley", studentNumber: null });
+    const gone = await addStudent(db, newTeacher, current.id, { firstName: "Moved", lastName: "Away", studentNumber: null });
+    await setStudentActive(db, newTeacher, gone!.id, false);
+
+    expect(await rosterCounts(db, newTeacher)).toEqual({ students: 1, classes: 1 });
   });
 });

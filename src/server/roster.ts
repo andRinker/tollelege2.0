@@ -111,6 +111,21 @@ export async function listClasses(db: Database, teacherId: string, today: string
   return rows;
 }
 
+/** Active students and classes that aren't archived. */
+export async function rosterCounts(db: Database, teacherId: string) {
+  const [[studentTotals], [classTotals]] = await Promise.all([
+    db
+      .select({ count: count() })
+      .from(students)
+      .where(and(eq(students.teacherId, teacherId), eq(students.active, true))),
+    db
+      .select({ count: count() })
+      .from(classes)
+      .where(and(eq(classes.teacherId, teacherId), isNull(classes.archivedAt))),
+  ]);
+  return { students: studentTotals.count, classes: classTotals.count };
+}
+
 export type RosterStudent = {
   id: string;
   firstName: string;

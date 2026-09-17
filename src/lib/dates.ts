@@ -59,3 +59,19 @@ export function schoolYearLabel(today: string): string {
   const start = month >= 7 ? year : year - 1;
   return `${start}–${String((start + 1) % 100).padStart(2, "0")}`;
 }
+
+/** The hour (0–23) on the clock in the teacher's time zone. */
+export function hourInTimeZone(timeZone: string | null | undefined, now = new Date()): number {
+  const hour = new Intl.DateTimeFormat("en-US", { timeZone: timeZone || "UTC", hour: "numeric", hourCycle: "h23" }).format(now);
+  return Number(hour);
+}
+
+/** "2:14 PM" today, "Yesterday", or a calendar date, all in the teacher's time zone. */
+export function formatRecentInstant(instant: Date, timeZone: string | null | undefined, today: string): string {
+  const day = todayInTimeZone(timeZone, instant);
+  if (day === today) {
+    return instant.toLocaleTimeString("en-US", { timeZone: timeZone || "UTC", hour: "numeric", minute: "2-digit" });
+  }
+  if (daysBetween(day, today) === 1) return "Yesterday";
+  return formatCalendarDate(day, today);
+}

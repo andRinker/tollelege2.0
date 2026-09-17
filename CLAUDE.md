@@ -10,7 +10,7 @@
 - `npm run typecheck` · `npm run lint` · `npm test` (Vitest unit + integration on in-memory PGlite) · `npm run test:e2e` (Playwright)
 - `npm run db:generate -- --name <change>` — write a SQL migration after editing `src/db/schema/*`
 - `npm run db:migrate` — apply migrations to PGlite, or to `DATABASE_URL` when set. PGlite is single-process: stop the dev server first.
-- `npm run db:seed` · `npm run db:reset` — demo data · delete and recreate the local database
+- `npm run db:seed` · `npm run db:reset` — demo data (sign in as demo@tollelege.test / take-and-read; stop the dev server first) · delete and recreate the local database
 
 ## Rules
 

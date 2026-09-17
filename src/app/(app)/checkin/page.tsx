@@ -8,10 +8,11 @@ import { CheckinFlow } from "./checkin-flow";
 
 export const metadata: Metadata = { title: "Check in" };
 
-export default async function CheckinPage() {
+export default async function CheckinPage({ searchParams }: PageProps<"/checkin">) {
   const { teacherId } = await requireTeacher();
+  const { show } = await searchParams;
   const settings = await getRequestSettings();
   const today = todayInTimeZone(settings.timeZone);
   const loans = await listOpenLoans(getDb(), teacherId, { today });
-  return <CheckinFlow loans={loans} today={today} timeZone={settings.timeZone} />;
+  return <CheckinFlow loans={loans} today={today} timeZone={settings.timeZone} initialFilter={show === "overdue" ? "overdue" : "all"} />;
 }

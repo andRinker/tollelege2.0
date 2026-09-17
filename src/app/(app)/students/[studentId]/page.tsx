@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { z } from "zod";
 import { BookCover } from "@/components/book-cover";
 import { LoanActions } from "@/components/loan-actions";
+import { StatCard } from "@/components/stat-card";
 import { getDb } from "@/db/client";
 import { describeDueDate, formatInstant, isOverdue, todayInTimeZone } from "@/lib/dates";
 import { NotFoundError } from "@/server/errors";
@@ -11,32 +12,12 @@ import { requireTeacher } from "@/server/session";
 import { getRequestSettings } from "@/server/theme";
 import { cx } from "@/ui/cx";
 import { LinkButton } from "@/ui/components/button";
-import { Avatar, PageHeader, Shape } from "@/ui/components/expressive";
+import { Avatar, PageHeader } from "@/ui/components/expressive";
 import { List, ListItem } from "@/ui/components/list";
 import { iconArrowBack, iconOutput } from "@/ui/icons/generated";
-import type { ShapeName } from "@/ui/shapes/shapes";
 import { StudentActions } from "../../classes/student-actions";
 
 export const metadata: Metadata = { title: "Student" };
-
-function Stat({ value, label, shape, tone }: { value: number; label: string; shape: ShapeName; tone: "primary" | "tertiary" | "error" }) {
-  const styles = {
-    primary: ["bg-primary-container text-on-primary-container", "fill-primary/10"],
-    tertiary: ["bg-tertiary-container text-on-tertiary-container", "fill-tertiary/10"],
-    error: ["bg-error-container text-on-error-container", "fill-error/10"],
-  }[tone];
-  return (
-    <div className={cx("relative flex flex-col gap-1 overflow-hidden rounded-xl p-5", styles[0])}>
-      <span aria-hidden="true" className="absolute -top-5 -right-5">
-        <Shape shape={shape} size={96} className={styles[1]} />
-      </span>
-      <span className="relative text-display-sm-em tabular-nums" style={{ fontVariationSettings: '"ROND" 100' }}>
-        {value}
-      </span>
-      <span className="relative text-title-sm">{label}</span>
-    </div>
-  );
-}
 
 export default async function StudentPage({ params }: PageProps<"/students/[studentId]">) {
   const { teacherId } = await requireTeacher();
@@ -99,9 +80,9 @@ export default async function StudentPage({ params }: PageProps<"/students/[stud
       />
 
       <div className="grid grid-cols-3 gap-3 pb-8">
-        <Stat value={current.length} label={current.length === 1 ? "Book out" : "Books out"} shape="cookie9" tone="primary" />
-        <Stat value={overdueCount} label="Overdue" shape="softBurst" tone={overdueCount > 0 ? "error" : "tertiary"} />
-        <Stat value={history.length} label={history.length === 1 ? "Book returned" : "Books returned"} shape="clover4" tone="tertiary" />
+        <StatCard value={current.length} label={current.length === 1 ? "Book out" : "Books out"} shape="cookie9" tone="primary" />
+        <StatCard value={overdueCount} label="Overdue" shape="softBurst" tone={overdueCount > 0 ? "error" : "tertiary"} />
+        <StatCard value={history.length} label={history.length === 1 ? "Book returned" : "Books returned"} shape="clover4" tone="tertiary" />
       </div>
 
       <div className="grid grid-cols-1 gap-8 expanded:grid-cols-2">
