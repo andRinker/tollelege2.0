@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { z } from "zod";
 import { BookCover } from "@/components/book-cover";
+import { LoanActions } from "@/components/loan-actions";
 import { getDb } from "@/db/client";
 import { describeDueDate, formatInstant, isOverdue, todayInTimeZone } from "@/lib/dates";
 import { NotFoundError } from "@/server/errors";
@@ -103,7 +104,7 @@ export default async function StudentPage({ params }: PageProps<"/students/[stud
         <Stat value={history.length} label={history.length === 1 ? "Book returned" : "Books returned"} shape="clover4" tone="tertiary" />
       </div>
 
-      <div className="grid gap-8 expanded:grid-cols-2">
+      <div className="grid grid-cols-1 gap-8 expanded:grid-cols-2">
         <section className="flex flex-col gap-3">
           <h2 className="text-title-lg-em">Checked out now</h2>
           {current.length === 0 ? (
@@ -128,6 +129,7 @@ export default async function StudentPage({ params }: PageProps<"/students/[stud
                     </span>
                   }
                   href={`/library/${loan.bookId}`}
+                  actions={<LoanActions loanId={loan.loanId} title={loan.title} studentName={fullName} />}
                 />
               ))}
             </List>

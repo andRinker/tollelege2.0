@@ -41,7 +41,7 @@ function Content({ leading, headline, overline, supporting, trailing }: ListItem
   );
 }
 
-const ROW = "flex min-h-14 w-full items-center gap-4 bg-surface-container px-4 py-2 text-left";
+const ROW = "flex min-h-14 w-full min-w-0 items-center gap-4 bg-surface-container px-4 py-2 text-left";
 
 type ListItemProps = ListItemContentProps & {
   href?: AriaLinkProps["href"];
@@ -56,8 +56,8 @@ export function ListItem({ href, onAction, actions, selected, className, ...cont
   const interactive = "state-layer focus-ring-inset cursor-pointer";
   const selectedClass = selected && "bg-secondary-container [&_*]:text-on-secondary-container";
   return (
-    <li className={cx("group/item flex", className)}>
-      <div className={cx("flex w-full items-center overflow-hidden", ITEM_SHAPE)}>
+    <li className={cx("group/item flex min-w-0", className)}>
+      <div className={cx("flex w-full min-w-0 items-center overflow-hidden", ITEM_SHAPE)}>
         {href ? (
           <AriaLink href={href} className={cx(ROW, interactive, selectedClass)}>
             <Content {...content} />

@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { z } from "zod";
 import { availabilityText } from "@/components/availability";
 import { BookCover } from "@/components/book-cover";
+import { LoanActions } from "@/components/loan-actions";
 import { READING_LEVEL_FIELD_LABELS } from "@/components/book-form";
 import { getDb } from "@/db/client";
 import type { CopyStatus } from "@/db/schema/enums";
@@ -71,7 +72,7 @@ export default async function BookPage({ params }: PageProps<"/library/[bookId]"
         }
       />
 
-      <div className="grid gap-6 expanded:grid-cols-[260px_minmax(0,1fr)] expanded:items-start">
+      <div className="grid grid-cols-1 gap-6 expanded:grid-cols-[260px_minmax(0,1fr)] expanded:items-start">
         <aside className="flex flex-col gap-4 max-expanded:grid max-expanded:grid-cols-[120px_minmax(0,1fr)] max-expanded:items-center medium:max-expanded:grid-cols-[180px_minmax(0,1fr)]">
           <BookCover title={book.title} coverUrl={book.coverUrl} size="lg" className="rounded-lg shadow-2" />
           <div className="relative flex flex-col gap-1 overflow-hidden rounded-xl bg-primary-container p-5 text-on-primary-container">
@@ -159,6 +160,9 @@ export default async function BookPage({ params }: PageProps<"/library/[bookId]"
                     supporting={<span className={cx(overdue && copy.loanId && "text-error")}>{supporting}</span>}
                     href={copy.studentId ? `/students/${copy.studentId}` : undefined}
                     actions={
+                      copy.loanId && studentName ? (
+                        <LoanActions loanId={copy.loanId} title={book.title} studentName={studentName} />
+                      ) : (
                       <CopyMenu
                         bookId={book.id}
                         copyId={copy.id}
@@ -167,6 +171,7 @@ export default async function BookPage({ params }: PageProps<"/library/[bookId]"
                         isCheckedOut={Boolean(copy.loanId)}
                         canDelete={copy.loanCount === 0 && copies.length > 1}
                       />
+                      )
                     }
                   />
                 );

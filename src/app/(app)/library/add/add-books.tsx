@@ -143,7 +143,7 @@ export function AddBooks({ readingLevelSystem, suggestions }: { readingLevelSyst
   const lastEntry = entries[0];
 
   return (
-    <div className="grid gap-4 expanded:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] expanded:items-start">
+    <div className="grid grid-cols-1 gap-4 expanded:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] expanded:items-start">
       <Section>
         <Form
           onSubmit={(event) => {
