@@ -1,3 +1,5 @@
+import { APP_NAME } from "@/lib/brand";
+
 type PasswordResetEmail = { to: string; name: string; url: string };
 
 export async function sendPasswordResetEmail({ to, name, url }: PasswordResetEmail): Promise<void> {
@@ -16,9 +18,9 @@ export async function sendPasswordResetEmail({ to, name, url }: PasswordResetEma
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      from: process.env.EMAIL_FROM || "Classroom Library <onboarding@resend.dev>",
+      from: process.env.EMAIL_FROM || `${APP_NAME} <onboarding@resend.dev>`,
       to: [to],
-      subject: "Reset your Classroom Library password",
+      subject: `Reset your ${APP_NAME} password`,
       text: `${greeting}\n\nUse this link to choose a new password:\n${url}\n\nIf you didn't ask to reset your password, you can ignore this email.`,
       html: `<p>${escapeHtml(greeting)}</p><p><a href="${escapeHtml(url)}">Choose a new password</a></p><p>If you didn't ask to reset your password, you can ignore this email.</p>`,
     }),

@@ -4,6 +4,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
 import { getDb } from "@/db/client";
 import * as schema from "@/db/schema";
+import { APP_NAME } from "@/lib/brand";
 import { sendPasswordResetEmail } from "@/lib/email";
 
 export const isGoogleSignInEnabled = Boolean(
@@ -28,7 +29,7 @@ function vercelOrigins(): string[] {
 }
 
 export const auth = betterAuth({
-  appName: "Classroom Library",
+  appName: APP_NAME,
   baseURL: resolveBaseUrl(),
   secret: process.env.BETTER_AUTH_SECRET,
   trustedOrigins: vercelOrigins(),

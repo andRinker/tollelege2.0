@@ -1,26 +1,449 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
+/*
+ * Material 3 Expressive tokens. Color values come from the per-teacher scheme that
+ * the root layout inlines as --md-sys-color-* variables (src/ui/theme/scheme.ts).
+ * Values: m3.material.io (color roles, type scale, shape, motion, elevation).
+ */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-*: initial;
+  --color-white: #fff;
+  --color-black: #000;
+  --color-primary: var(--md-sys-color-primary);
+  --color-on-primary: var(--md-sys-color-on-primary);
+  --color-primary-container: var(--md-sys-color-primary-container);
+  --color-on-primary-container: var(--md-sys-color-on-primary-container);
+  --color-inverse-primary: var(--md-sys-color-inverse-primary);
+  --color-primary-fixed: var(--md-sys-color-primary-fixed);
+  --color-primary-fixed-dim: var(--md-sys-color-primary-fixed-dim);
+  --color-on-primary-fixed: var(--md-sys-color-on-primary-fixed);
+  --color-on-primary-fixed-variant: var(--md-sys-color-on-primary-fixed-variant);
+  --color-secondary: var(--md-sys-color-secondary);
+  --color-on-secondary: var(--md-sys-color-on-secondary);
+  --color-secondary-container: var(--md-sys-color-secondary-container);
+  --color-on-secondary-container: var(--md-sys-color-on-secondary-container);
+  --color-secondary-fixed: var(--md-sys-color-secondary-fixed);
+  --color-secondary-fixed-dim: var(--md-sys-color-secondary-fixed-dim);
+  --color-on-secondary-fixed: var(--md-sys-color-on-secondary-fixed);
+  --color-on-secondary-fixed-variant: var(--md-sys-color-on-secondary-fixed-variant);
+  --color-tertiary: var(--md-sys-color-tertiary);
+  --color-on-tertiary: var(--md-sys-color-on-tertiary);
+  --color-tertiary-container: var(--md-sys-color-tertiary-container);
+  --color-on-tertiary-container: var(--md-sys-color-on-tertiary-container);
+  --color-tertiary-fixed: var(--md-sys-color-tertiary-fixed);
+  --color-tertiary-fixed-dim: var(--md-sys-color-tertiary-fixed-dim);
+  --color-on-tertiary-fixed: var(--md-sys-color-on-tertiary-fixed);
+  --color-on-tertiary-fixed-variant: var(--md-sys-color-on-tertiary-fixed-variant);
+  --color-error: var(--md-sys-color-error);
+  --color-on-error: var(--md-sys-color-on-error);
+  --color-error-container: var(--md-sys-color-error-container);
+  --color-on-error-container: var(--md-sys-color-on-error-container);
+  --color-background: var(--md-sys-color-background);
+  --color-on-background: var(--md-sys-color-on-background);
+  --color-surface: var(--md-sys-color-surface);
+  --color-on-surface: var(--md-sys-color-on-surface);
+  --color-surface-variant: var(--md-sys-color-surface-variant);
+  --color-on-surface-variant: var(--md-sys-color-on-surface-variant);
+  --color-surface-dim: var(--md-sys-color-surface-dim);
+  --color-surface-bright: var(--md-sys-color-surface-bright);
+  --color-surface-container-lowest: var(--md-sys-color-surface-container-lowest);
+  --color-surface-container-low: var(--md-sys-color-surface-container-low);
+  --color-surface-container: var(--md-sys-color-surface-container);
+  --color-surface-container-high: var(--md-sys-color-surface-container-high);
+  --color-surface-container-highest: var(--md-sys-color-surface-container-highest);
+  --color-inverse-surface: var(--md-sys-color-inverse-surface);
+  --color-inverse-on-surface: var(--md-sys-color-inverse-on-surface);
+  --color-outline: var(--md-sys-color-outline);
+  --color-outline-variant: var(--md-sys-color-outline-variant);
+  --color-shadow: var(--md-sys-color-shadow);
+  --color-scrim: var(--md-sys-color-scrim);
+
+  --font-sans: var(--font-google-sans-flex), "Google Sans Flex", ui-sans-serif, system-ui, sans-serif;
+
+  /* Type scale: baseline and emphasized (Google Sans Flex tracking). */
+  --text-*: initial;
+  --text-display-lg: 3.5625rem;
+  --text-display-lg--line-height: 4rem;
+  --text-display-lg--font-weight: 400;
+  --text-display-md: 2.8125rem;
+  --text-display-md--line-height: 3.25rem;
+  --text-display-md--font-weight: 400;
+  --text-display-sm: 2.25rem;
+  --text-display-sm--line-height: 2.75rem;
+  --text-display-sm--font-weight: 400;
+  --text-headline-lg: 2rem;
+  --text-headline-lg--line-height: 2.5rem;
+  --text-headline-lg--font-weight: 400;
+  --text-headline-md: 1.75rem;
+  --text-headline-md--line-height: 2.25rem;
+  --text-headline-md--font-weight: 400;
+  --text-headline-sm: 1.5rem;
+  --text-headline-sm--line-height: 2rem;
+  --text-headline-sm--font-weight: 400;
+  --text-title-lg: 1.375rem;
+  --text-title-lg--line-height: 1.75rem;
+  --text-title-lg--font-weight: 400;
+  --text-title-md: 1rem;
+  --text-title-md--line-height: 1.5rem;
+  --text-title-md--font-weight: 500;
+  --text-title-sm: 0.875rem;
+  --text-title-sm--line-height: 1.25rem;
+  --text-title-sm--font-weight: 500;
+  --text-body-lg: 1rem;
+  --text-body-lg--line-height: 1.5rem;
+  --text-body-lg--font-weight: 400;
+  --text-body-md: 0.875rem;
+  --text-body-md--line-height: 1.25rem;
+  --text-body-md--font-weight: 400;
+  --text-body-sm: 0.75rem;
+  --text-body-sm--line-height: 1rem;
+  --text-body-sm--font-weight: 400;
+  --text-label-lg: 0.875rem;
+  --text-label-lg--line-height: 1.25rem;
+  --text-label-lg--font-weight: 500;
+  --text-label-md: 0.75rem;
+  --text-label-md--line-height: 1rem;
+  --text-label-md--font-weight: 500;
+  --text-label-md--letter-spacing: 0.00625rem;
+  --text-label-sm: 0.6875rem;
+  --text-label-sm--line-height: 1rem;
+  --text-label-sm--font-weight: 500;
+  --text-label-sm--letter-spacing: 0.00625rem;
+
+  --text-display-lg-em: 3.5625rem;
+  --text-display-lg-em--line-height: 4rem;
+  --text-display-lg-em--font-weight: 500;
+  --text-display-md-em: 2.8125rem;
+  --text-display-md-em--line-height: 3.25rem;
+  --text-display-md-em--font-weight: 500;
+  --text-display-sm-em: 2.25rem;
+  --text-display-sm-em--line-height: 2.75rem;
+  --text-display-sm-em--font-weight: 500;
+  --text-headline-lg-em: 2rem;
+  --text-headline-lg-em--line-height: 2.5rem;
+  --text-headline-lg-em--font-weight: 500;
+  --text-headline-md-em: 1.75rem;
+  --text-headline-md-em--line-height: 2.25rem;
+  --text-headline-md-em--font-weight: 500;
+  --text-headline-sm-em: 1.5rem;
+  --text-headline-sm-em--line-height: 2rem;
+  --text-headline-sm-em--font-weight: 500;
+  --text-title-lg-em: 1.375rem;
+  --text-title-lg-em--line-height: 1.75rem;
+  --text-title-lg-em--font-weight: 500;
+  --text-title-md-em: 1rem;
+  --text-title-md-em--line-height: 1.5rem;
+  --text-title-md-em--font-weight: 700;
+  --text-title-sm-em: 0.875rem;
+  --text-title-sm-em--line-height: 1.25rem;
+  --text-title-sm-em--font-weight: 700;
+  --text-body-lg-em: 1rem;
+  --text-body-lg-em--line-height: 1.5rem;
+  --text-body-lg-em--font-weight: 500;
+  --text-body-md-em: 0.875rem;
+  --text-body-md-em--line-height: 1.25rem;
+  --text-body-md-em--font-weight: 500;
+  --text-body-sm-em: 0.75rem;
+  --text-body-sm-em--line-height: 1rem;
+  --text-body-sm-em--font-weight: 500;
+  --text-label-lg-em: 0.875rem;
+  --text-label-lg-em--line-height: 1.25rem;
+  --text-label-lg-em--font-weight: 700;
+  --text-label-md-em: 0.75rem;
+  --text-label-md-em--line-height: 1rem;
+  --text-label-md-em--font-weight: 700;
+  --text-label-md-em--letter-spacing: 0.00625rem;
+  --text-label-sm-em: 0.6875rem;
+  --text-label-sm-em--line-height: 1rem;
+  --text-label-sm-em--font-weight: 700;
+  --text-label-sm-em--letter-spacing: 0.00625rem;
+
+  /* Corner radius scale. `rounded-full` is built in. */
+  --radius-*: initial;
+  --radius-none: 0px;
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-lg-plus: 20px;
+  --radius-xl: 28px;
+  --radius-xl-plus: 32px;
+  --radius-2xl: 48px;
+
+  /* Motion: spring tokens converted to curves for the web (expressive scheme). */
+  --ease-*: initial;
+  --ease-fast-spatial: cubic-bezier(0.42, 1.67, 0.21, 0.9);
+  --ease-default-spatial: cubic-bezier(0.38, 1.21, 0.22, 1);
+  --ease-slow-spatial: cubic-bezier(0.39, 1.29, 0.35, 0.98);
+  --ease-fast-effects: cubic-bezier(0.31, 0.94, 0.34, 1);
+  --ease-default-effects: cubic-bezier(0.34, 0.8, 0.34, 1);
+  --ease-slow-effects: cubic-bezier(0.34, 0.88, 0.34, 1);
+  --ease-standard-spatial: cubic-bezier(0.27, 1.06, 0.18, 1);
+
+  /* Elevation levels 1–5. */
+  --shadow-*: initial;
+  --shadow-1: 0 1px 2px color-mix(in srgb, var(--md-sys-color-shadow) 30%, transparent), 0 1px 3px 1px color-mix(in srgb, var(--md-sys-color-shadow) 15%, transparent);
+  --shadow-2: 0 1px 2px color-mix(in srgb, var(--md-sys-color-shadow) 30%, transparent), 0 2px 6px 2px color-mix(in srgb, var(--md-sys-color-shadow) 15%, transparent);
+  --shadow-3: 0 1px 3px color-mix(in srgb, var(--md-sys-color-shadow) 30%, transparent), 0 4px 8px 3px color-mix(in srgb, var(--md-sys-color-shadow) 15%, transparent);
+  --shadow-4: 0 2px 3px color-mix(in srgb, var(--md-sys-color-shadow) 30%, transparent), 0 6px 10px 4px color-mix(in srgb, var(--md-sys-color-shadow) 15%, transparent);
+  --shadow-5: 0 4px 4px color-mix(in srgb, var(--md-sys-color-shadow) 30%, transparent), 0 8px 12px 6px color-mix(in srgb, var(--md-sys-color-shadow) 15%, transparent);
+
+  /* Window size classes: compact < 600 ≤ medium < 840 ≤ expanded < 1200 ≤ large < 1600 ≤ xlarge. */
+  --breakpoint-*: initial;
+  --breakpoint-medium: 600px;
+  --breakpoint-expanded: 840px;
+  --breakpoint-large: 1200px;
+  --breakpoint-xlarge: 1600px;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* Hover, focus, and press overlays in the content color. RAC components set data-* states. */
+@utility state-layer {
+  position: relative;
+  isolation: isolate;
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background-color: currentColor;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 150ms var(--ease-fast-effects);
+  }
+  &[data-hovered]::before {
+    opacity: 0.08;
+  }
+  &[data-focus-visible]::before,
+  &[data-pressed]::before {
+    opacity: 0.1;
+  }
+  &[data-disabled]::before {
+    opacity: 0;
+  }
+  @media (hover: hover) {
+    &:not([data-rac]):hover::before {
+      opacity: 0.08;
+    }
+  }
+  &:not([data-rac]):focus-visible::before,
+  &:not([data-rac]):active::before {
+    opacity: 0.1;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@utility focus-ring {
+  outline: none;
+  &[data-focus-visible],
+  &:not([data-rac]):focus-visible {
+    outline: 3px solid var(--md-sys-color-secondary);
+    outline-offset: 2px;
+  }
+}
+
+@utility focus-ring-inset {
+  outline: none;
+  &[data-focus-visible],
+  &:not([data-rac]):focus-visible {
+    outline: 3px solid var(--md-sys-color-secondary);
+    outline-offset: -3px;
+  }
+}
+
+/* Corners that morph on press or selection. Components set the three variables. */
+@utility shape-morph {
+  border-radius: var(--shape-rest);
+  transition:
+    border-radius 350ms var(--ease-standard-spatial),
+    padding 350ms var(--ease-fast-spatial),
+    width 350ms var(--ease-fast-spatial),
+    background-color 150ms var(--ease-fast-effects),
+    color 150ms var(--ease-fast-effects),
+    border-color 150ms var(--ease-fast-effects),
+    box-shadow 150ms var(--ease-fast-effects);
+  &[data-selected] {
+    border-radius: var(--shape-selected, var(--shape-rest));
+  }
+  &[data-pressed] {
+    border-radius: var(--shape-pressed);
+  }
+}
+
+/* Keeps extra-small controls at a 48px touch target. */
+@utility touch-target {
+  &::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: max(100%, 48px);
+    height: max(100%, 48px);
+    transform: translate(-50%, -50%);
+  }
+}
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--md-sys-color-surface);
+    color: var(--md-sys-color-on-surface);
+    font-family: var(--font-sans);
+    font-optical-sizing: auto;
+  }
+
+  ::selection {
+    background-color: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@keyframes wave-phase {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(var(--wave));
+  }
+}
+
+@keyframes progress-slide {
+  from {
+    transform: translateX(-40%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes arc-dash {
+  0% {
+    stroke-dasharray: 1 200;
+    stroke-dashoffset: 0;
+  }
+  50% {
+    stroke-dasharray: 70 200;
+    stroke-dashoffset: -15;
+  }
+  100% {
+    stroke-dasharray: 70 200;
+    stroke-dashoffset: -99;
+  }
+}
+
+@keyframes tooltip-in {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: scaleY(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes menu-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes fab-item-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Standard button group: the pressed button widens and its neighbors make room. */
+@utility button-group {
+  & > [data-pressed] {
+    padding-inline: calc(var(--btn-pad, 16px) * 1.35);
+    width: calc(var(--btn-w, auto) * 1.15);
+  }
+  & > :has(+ [data-pressed]),
+  & > [data-pressed] + * {
+    padding-inline: calc(var(--btn-pad, 16px) * 0.8);
+    width: calc(var(--btn-w, auto) * 0.9);
+  }
+}
+
+/* Connected button group: outer corners round, inner corners small; selected items round fully. */
+@utility connected-group {
+  & > * {
+    border-radius: var(--inner);
+    transition:
+      border-radius 350ms var(--ease-standard-spatial),
+      background-color 150ms var(--ease-fast-effects),
+      color 150ms var(--ease-fast-effects);
+  }
+  & > :first-child {
+    border-start-start-radius: var(--outer);
+    border-end-start-radius: var(--outer);
+  }
+  & > :last-child {
+    border-start-end-radius: var(--outer);
+    border-end-end-radius: var(--outer);
+  }
+  & > [data-selected] {
+    border-radius: var(--outer);
+  }
+}
+
+@media (width < 600px) {
+  :root:has([data-nav-bar]) {
+    --snackbar-offset: 64px;
+  }
 }

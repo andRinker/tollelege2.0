@@ -1,8 +1,8 @@
 @AGENTS.md
 
-# Classroom Library
+# Tolle Lege
 
-Multi-teacher web app for cataloging a classroom library, managing class rosters, and checking books out to students. Next.js 16 (App Router, Server Actions) + React 19, Drizzle ORM on Postgres (PGlite locally, Neon on Vercel), Better Auth (email/password + Google), and a custom Material 3 Expressive design system built on React Aria Components.
+"Tolle lege" (take and read). Multi-teacher web app for cataloging a classroom library, managing class rosters, and checking books out to students. Next.js 16 (App Router, Server Actions) + React 19, Drizzle ORM on Postgres (PGlite locally, Neon on Vercel), Better Auth (email/password + Google), and a custom Material 3 Expressive design system built on React Aria Components.
 
 ## Commands
 

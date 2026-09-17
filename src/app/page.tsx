@@ -1,8 +1,7 @@
-export default function Home() {
-  return (
-    <main className="p-8">
-      <h1 className="text-2xl">Classroom Library</h1>
-      <p>Foundation is running.</p>
-    </main>
-  );
+import { redirect } from "next/navigation";
+import { getSession } from "@/server/session";
+
+export default async function Home() {
+  const session = await getSession();
+  redirect(session ? "/dashboard" : "/sign-in");
 }

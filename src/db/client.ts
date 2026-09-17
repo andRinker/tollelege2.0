@@ -60,7 +60,7 @@ export function resolvePgliteDataDir(): string | undefined {
   if (process.env.NEXT_PHASE === "phase-production-build") return undefined;
   const configured = process.env.PGLITE_DATA_DIR || ".data/pglite";
   if (configured === "memory://") return undefined;
-  const dir = path.resolve(process.cwd(), configured);
+  const dir = path.resolve(/* turbopackIgnore: true */ process.cwd(), configured);
   mkdirSync(dir, { recursive: true });
   return dir;
 }
