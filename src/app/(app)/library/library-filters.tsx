@@ -53,7 +53,7 @@ export function LibraryFilters({ query, availability, tag, level, bin, sort, tag
     <div className="flex flex-col gap-3 pb-4">
       <div className="flex items-center gap-2">
         <SearchField
-          placeholder="Search by title, author, ISBN, or tag"
+          placeholder="Search your library"
           aria-label="Search your library"
           value={search}
           onChange={(value) => {

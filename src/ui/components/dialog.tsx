@@ -49,7 +49,8 @@ export function Dialog({ title, children, actions, fullScreenOnCompact = false, 
                   <Heading slot="title" className="grow truncate text-title-lg">
                     {title}
                   </Heading>
-                  <div className="flex gap-2 pr-3">{actions?.(close)}</div>
+                  {/* The close button replaces Cancel, so only the last (confirming) action shows. */}
+                  <div className="flex gap-2 pr-3 [&>*:not(:last-child)]:hidden">{actions?.(close)}</div>
                 </div>
               )}
               <Heading

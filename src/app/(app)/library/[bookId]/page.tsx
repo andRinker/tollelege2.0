@@ -94,7 +94,7 @@ export default async function BookPage({ params }: PageProps<"/library/[bookId]"
                   {facts.map((fact) => (
                     <div key={fact.label} className="flex flex-col">
                       <dt className="text-label-md text-on-surface-variant">{fact.label}</dt>
-                      <dd className="text-body-lg tabular-nums">{fact.value}</dd>
+                      <dd className="text-body-lg whitespace-nowrap tabular-nums max-medium:text-body-md">{fact.value}</dd>
                     </div>
                   ))}
                 </dl>
