@@ -81,7 +81,7 @@ export default async function BookPage({ params }: PageProps<"/library/[bookId]"
             </span>
             <span className="relative text-display-md-em tabular-nums" style={{ fontVariationSettings: '"ROND" 100' }}>
               {available}
-              <span className="text-headline-sm text-on-primary-container/70">/{inCirculation.length}</span>
+              <span className="text-headline-sm">/{inCirculation.length}</span>
             </span>
             <span className="relative text-title-md">{availabilityText(available, inCirculation.length)}</span>
           </div>

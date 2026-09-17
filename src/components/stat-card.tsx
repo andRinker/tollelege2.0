@@ -37,7 +37,7 @@ export function StatCard({ value, label, detail, shape, tone, href }: StatCardPr
         {value}
       </span>
       <span className="relative text-title-sm">{label}</span>
-      {detail && <span className="relative text-body-sm opacity-80">{detail}</span>}
+      {detail && <span className="relative text-body-sm">{detail}</span>}
     </>
   );
   const classes = cx("group/stat relative flex flex-col gap-1 overflow-hidden rounded-xl p-5", container);

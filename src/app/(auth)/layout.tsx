@@ -27,7 +27,7 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
             Tolle lege.
           </p>
           <p className="text-headline-sm">{APP_TAGLINE}.</p>
-          <p className="text-title-md text-on-primary-container/80">{APP_DESCRIPTION}</p>
+          <p className="text-title-md text-on-primary-container">{APP_DESCRIPTION}</p>
         </div>
       </aside>
       <main className="flex items-center justify-center px-4 py-10 medium:px-10">
