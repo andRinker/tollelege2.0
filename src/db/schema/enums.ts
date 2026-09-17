@@ -1,0 +1,32 @@
+// Allowed values for text columns that behave like enums. Each is enforced by a
+// CHECK constraint in the table definition and by Zod at the action boundary.
+
+export const readingLevelSystems = [
+  "none",
+  "lexile",
+  "guided_reading",
+  "atos",
+  "grade_level",
+  "other",
+] as const;
+export type ReadingLevelSystem = (typeof readingLevelSystems)[number];
+
+export const themeModes = ["system", "light", "dark"] as const;
+export type ThemeMode = (typeof themeModes)[number];
+
+export const themeContrasts = ["standard", "medium", "high"] as const;
+export type ThemeContrast = (typeof themeContrasts)[number];
+
+export const metadataSources = ["openlibrary", "google_books", "manual"] as const;
+export type MetadataSource = (typeof metadataSources)[number];
+
+export const copyStatuses = ["in_circulation", "lost", "damaged", "withdrawn"] as const;
+export type CopyStatus = (typeof copyStatuses)[number];
+
+export const closeReasons = ["returned", "lost"] as const;
+export type CloseReason = (typeof closeReasons)[number];
+
+/** Renders `('a','b')` for use inside CHECK constraints. */
+export function sqlList(values: readonly string[]): string {
+  return `(${values.map((value) => `'${value}'`).join(",")})`;
+}
