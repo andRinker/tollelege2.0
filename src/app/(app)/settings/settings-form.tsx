@@ -26,15 +26,7 @@ import { shapePath } from "@/ui/shapes/shapes";
 import { DEFAULT_THEME_SEED, THEME_SWATCHES } from "@/ui/theme/constants";
 import { previewTheme } from "@/ui/theme/preview";
 import { saveSettings, type SettingsPatch } from "./actions";
-
-const READING_LEVEL_LABELS: Record<ReadingLevelSystem, string> = {
-  none: "Don't track reading levels",
-  lexile: "Lexile",
-  guided_reading: "Guided Reading (Fountas & Pinnell)",
-  atos: "ATOS / Accelerated Reader",
-  grade_level: "Grade level",
-  other: "Other",
-};
+import { READING_LEVEL_SYSTEM_LABELS } from "@/lib/reading-levels";
 
 const LOAN_PERIODS = [
   { id: "none", label: "No due dates", days: null },
@@ -119,7 +111,7 @@ export function SettingsForm({ settings, teacher, timeZones }: Props) {
   }
 
   return (
-    <div className="grid gap-4 expanded:grid-cols-2">
+    <div className="grid grid-cols-1 gap-4 expanded:grid-cols-2">
       <SettingsSection title="Appearance" description="Your color theme follows you to any device you sign in on.">
         <div className="flex flex-col gap-3">
           <span className="text-title-sm text-on-surface-variant">Theme color</span>
@@ -226,7 +218,7 @@ export function SettingsForm({ settings, teacher, timeZones }: Props) {
             description="Adds a reading level to each book so you can filter by it."
             defaultSelectedKey={settings.readingLevelSystem}
             onSelectionChange={(key) => save({ readingLevelSystem: key as ReadingLevelSystem })}
-            items={readingLevelSystems.map((id) => ({ id, name: READING_LEVEL_LABELS[id] }))}
+            items={readingLevelSystems.map((id) => ({ id, name: READING_LEVEL_SYSTEM_LABELS[id] }))}
           >
             {(item) => <ListBoxItem id={item.id}>{item.name}</ListBoxItem>}
           </Select>

@@ -11,6 +11,7 @@ import { ListBoxItem } from "@/ui/components/menu";
 import { ComboBox } from "@/ui/components/select";
 import { TextField } from "@/ui/components/text-field";
 import { iconAdd, iconLabel, iconRemove, iconShelves } from "@/ui/icons/generated";
+import { READING_LEVEL_FIELD_LABELS } from "@/lib/reading-levels";
 
 export type BookFormValue = {
   isbn: string;
@@ -122,15 +123,6 @@ export function bookInputFromForm(value: BookFormValue): BookDetailsInput {
     metadataSource: value.metadataSource,
   };
 }
-
-export const READING_LEVEL_FIELD_LABELS: Record<ReadingLevelSystem, string> = {
-  none: "Reading level",
-  lexile: "Lexile level",
-  guided_reading: "Guided Reading level",
-  atos: "ATOS book level",
-  grade_level: "Grade level",
-  other: "Reading level",
-};
 
 type Suggestions = { tags: string[]; locations: string[] };
 

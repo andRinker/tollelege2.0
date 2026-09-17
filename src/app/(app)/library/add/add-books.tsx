@@ -6,6 +6,7 @@ import { useRef, useState } from "react";
 import { Form } from "react-aria-components";
 import { BarcodeScannerDialog } from "@/components/barcode-scanner";
 import { BookCover } from "@/components/book-cover";
+import { useBarcodeWedge } from "@/components/use-barcode-wedge";
 import {
   BookFields,
   bookFormFromMetadata,
@@ -128,6 +129,9 @@ export function AddBooks({ readingLevelSystem, suggestions }: { readingLevelSyst
     if (rapid) void quickAdd(isbn13);
     else void lookUp(isbn13);
   }
+
+  // A scan still works when focus has wandered to a button.
+  useBarcodeWedge(submitIsbn, !scannerOpen);
 
   async function undo(entry: ScanEntry) {
     if (!entry.result) return;

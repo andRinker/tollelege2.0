@@ -5,6 +5,7 @@ import { Form } from "react-aria-components";
 import { BarcodeScannerDialog } from "@/components/barcode-scanner";
 import { BookCover } from "@/components/book-cover";
 import { LoanActions, useReturnWithUndo } from "@/components/loan-actions";
+import { useBarcodeWedge } from "@/components/use-barcode-wedge";
 import { describeDueDate, formatInstant } from "@/lib/dates";
 import { formatIsbn13 } from "@/lib/isbn";
 import type { OpenLoan } from "@/server/circulation";
@@ -98,6 +99,9 @@ export function CheckinFlow({ loans, today, timeZone, initialFilter }: Props) {
     setIsbn("");
     setTimeout(() => inputRef.current?.focus(), 0);
   }
+
+  // A scan still works when focus has wandered to a button.
+  useBarcodeWedge((code) => void submit(code), !scannerOpen);
 
   return (
     <>

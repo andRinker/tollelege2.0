@@ -7,8 +7,9 @@ import { Button as AriaButton, Form } from "react-aria-components";
 import { Availability } from "@/components/availability";
 import { BarcodeScannerDialog } from "@/components/barcode-scanner";
 import { BookCover } from "@/components/book-cover";
+import { useBarcodeWedge } from "@/components/use-barcode-wedge";
 import { describeDueDate } from "@/lib/dates";
-import { formatIsbn13 } from "@/lib/isbn";
+import { formatIsbn13, looksLikeIsbn } from "@/lib/isbn";
 import type { CheckoutResult } from "@/server/circulation";
 import type { StudentOption } from "@/server/roster";
 import { cx } from "@/ui/cx";
@@ -90,8 +91,12 @@ export function CheckoutFlow({ students, classes, today, defaultDueOn, maxBooksP
 }
 
 function StudentPicker({ students, classes, onPick }: { students: StudentOption[]; classes: Props["classes"]; onPick: (id: string) => void }) {
+  const showSnackbar = useSnackbar();
   const [classId, setClassId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const scannedBookFirst = looksLikeIsbn(query);
+
+  useBarcodeWedge(() => showSnackbar({ message: "Choose a student first, then scan their book." }));
 
   const visible = useMemo(() => {
     const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -130,7 +135,14 @@ function StudentPicker({ students, classes, onPick }: { students: StudentOption[
         )}
       </div>
 
-      {visible.length === 0 ? (
+      {scannedBookFirst ? (
+        <EmptyState
+          icon={iconBarcodeScanner}
+          shape="softBurst"
+          title="Choose a student first"
+          description="That looks like a book's barcode. Pick who's borrowing it, then scan the book again."
+        />
+      ) : visible.length === 0 ? (
         <EmptyState icon={iconSearch} shape="softBurst" title="No students match" description="Check the spelling or choose a different class." />
       ) : (
         <ul className="grid grid-cols-2 gap-2 medium:grid-cols-3 expanded:grid-cols-4 large:grid-cols-5">
@@ -218,6 +230,12 @@ function CheckoutForStudent({
     handleIsbnResult(await checkOutByIsbnAction({ studentId: student.id, isbn: value, dueOn }));
     setPending(false);
   }
+
+  // A scan still works when focus has wandered to a button.
+  useBarcodeWedge((code) => {
+    setIsbn("");
+    void submitIsbn(code);
+  }, !scannerOpen);
 
   const lastItem = session[0];
 
