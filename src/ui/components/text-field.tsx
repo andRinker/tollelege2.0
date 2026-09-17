@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 import {
   Button as AriaButton,
   FieldError,
@@ -89,6 +89,7 @@ type TextFieldProps = Omit<AriaTextFieldProps, "className" | "children"> & {
   rows?: number;
   className?: string;
   inputClassName?: string;
+  inputRef?: Ref<HTMLInputElement>;
 };
 
 export function TextField({
@@ -103,6 +104,7 @@ export function TextField({
   rows = 3,
   className,
   inputClassName,
+  inputRef,
   ...props
 }: TextFieldProps) {
   return (
@@ -122,6 +124,7 @@ export function TextField({
               />
             ) : (
               <Input
+                ref={inputRef}
                 placeholder={placeholder ?? " "}
                 className={cx(inputClasses(variant, Boolean(leadingIcon), Boolean(trailing) || isInvalid), inputClassName)}
               />
