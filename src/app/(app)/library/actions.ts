@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getDb } from "@/db/client";
-import { copyStatuses, metadataSources } from "@/db/schema/enums";
+import { manualCopyStatuses, metadataSources } from "@/db/schema/enums";
 import { type ActionResult, fail, ok } from "@/lib/action-result";
 import { normalizeIsbn } from "@/lib/isbn";
 import {
@@ -203,7 +203,7 @@ export async function addCopyAction(bookId: string): Promise<ActionResult<{ tota
 
 export async function setCopyStatusAction(bookId: string, copyId: string, status: string): Promise<ActionResult> {
   const { teacherId } = await requireTeacher();
-  const parsedStatus = z.enum(copyStatuses).safeParse(status);
+  const parsedStatus = z.enum(manualCopyStatuses).safeParse(status);
   if (!id.safeParse(copyId).success || !parsedStatus.success) return fail("That copy wasn't found.");
   try {
     await setCopyStatus(getDb(), teacherId, copyId, parsedStatus.data);

@@ -23,6 +23,7 @@ import { AddCopyButton, BookActions, CopyMenu } from "./book-actions";
 export const metadata: Metadata = { title: "Book" };
 
 const STATUS_LABELS: Record<Exclude<CopyStatus, "in_circulation">, string> = {
+  lent_out: "Lent out",
   lost: "Lost",
   damaged: "Damaged",
   withdrawn: "Withdrawn",
