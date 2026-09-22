@@ -48,6 +48,7 @@ import {
   quickAddAction,
   undoQuickAddAction,
 } from "../actions";
+import { ShelfScanDialog } from "./shelf-scan";
 
 type Suggestions = { tags: string[]; locations: string[] };
 
@@ -80,6 +81,7 @@ export function AddBooks({ readingLevelSystem, suggestions }: { readingLevelSyst
   const [entries, setEntries] = useState<ScanEntry[]>([]);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [manual, setManual] = useState<BookFormValue | null>(null);
+  const [shelfOpen, setShelfOpen] = useState(false);
 
   function refocus() {
     setIsbnInput("");
@@ -190,6 +192,9 @@ export function AddBooks({ readingLevelSystem, suggestions }: { readingLevelSyst
             </span>
           </Switch>
         </div>
+        <Button variant="tonal" size="md" icon={iconPhotoCamera} onPress={() => setShelfOpen(true)} className="self-start">
+          Photograph a shelf
+        </Button>
         <Button variant="text" icon={iconEdit} className="self-start" onPress={() => setManual({ ...EMPTY_BOOK })}>
           Add a book without an ISBN
         </Button>
@@ -213,6 +218,8 @@ export function AddBooks({ readingLevelSystem, suggestions }: { readingLevelSyst
           />
         )}
       </div>
+
+      <ShelfScanDialog isOpen={shelfOpen} onOpenChange={setShelfOpen} />
 
       <BarcodeScannerDialog
         isOpen={scannerOpen}

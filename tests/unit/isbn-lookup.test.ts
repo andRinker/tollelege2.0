@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { lookupIsbn } from "@/server/isbn-lookup";
+import { mergeMetadata, normalizeAuthors } from "@/server/isbn-lookup/merge";
+import type { BookMetadata } from "@/server/isbn-lookup/sources";
 import { fetchGoogleBooks, fetchOpenLibrary, type Fetch } from "@/server/isbn-lookup/sources";
 import { createTestDb, type TestDatabase } from "../helpers/test-db";
 
@@ -72,6 +74,78 @@ describe("Google Books mapping", () => {
   });
 });
 
+describe("author names", () => {
+  it("collapses one person listed in both inverted and plain form", () => {
+    // Exactly what Open Library returns for 9780819874108.
+    expect(normalizeAuthors(["West, Christopher", "Christopher West"])).toEqual(["Christopher West"]);
+  });
+
+  it("leaves a suffix alone rather than reading it as a given name", () => {
+    expect(normalizeAuthors(["King, Jr."])).toEqual(["King, Jr."]);
+  });
+
+  it("treats spacing in initials as the same person", () => {
+    expect(normalizeAuthors(["J. K. Rowling", "J.K. Rowling"])).toEqual(["J. K. Rowling"]);
+  });
+
+  it("drops blanks and caps the list at five", () => {
+    expect(normalizeAuthors(["  ", "A One", "B Two", "C Three", "D Four", "E Five", "F Six"])).toHaveLength(5);
+  });
+});
+
+describe("merging sources", () => {
+  const openLibrary: BookMetadata = {
+    isbn13: "9780819874108",
+    title: "Theology of the body explained",
+    subtitle: null,
+    authors: ["West, Christopher", "Christopher West"],
+    description: "A commentary on the Wednesday audiences.",
+    coverUrl: "https://covers.openlibrary.org/b/id/1-M.jpg",
+    publisher: "Pauline Books & Media",
+    publishedYear: 2003,
+    pageCount: 530,
+    source: "openlibrary",
+  };
+  const googleBooks: BookMetadata = {
+    isbn13: "9780819874108",
+    title: "Theology of the Body Explained",
+    subtitle: `A Commentary on John Paul II's "gospel of the Body"`,
+    authors: ["Christopher West"],
+    description: null,
+    coverUrl: null,
+    publisher: null,
+    publishedYear: null,
+    pageCount: null,
+    source: "google_books",
+  };
+
+  it("names the book from Google Books and describes the edition from Open Library", () => {
+    expect(mergeMetadata(openLibrary, googleBooks)).toMatchObject({
+      title: "Theology of the Body Explained",
+      subtitle: `A Commentary on John Paul II's "gospel of the Body"`,
+      authors: ["Christopher West"],
+      publisher: "Pauline Books & Media",
+      pageCount: 530,
+      publishedYear: 2003,
+      description: "A commentary on the Wednesday audiences.",
+      coverUrl: "https://covers.openlibrary.org/b/id/1-M.jpg",
+      source: "google_books",
+    });
+  });
+
+  it("still tidies the authors when only Open Library answers", () => {
+    expect(mergeMetadata(openLibrary, null)?.authors).toEqual(["Christopher West"]);
+  });
+
+  it("falls back to Open Library's naming when Google Books has none", () => {
+    expect(mergeMetadata(openLibrary, null)?.title).toBe("Theology of the body explained");
+  });
+
+  it("returns null when neither source knows the book", () => {
+    expect(mergeMetadata(null, null)).toBeNull();
+  });
+});
+
 describe("lookupIsbn", () => {
   let testDb: TestDatabase;
 
@@ -106,6 +180,22 @@ describe("lookupIsbn", () => {
 
     await lookupIsbn(testDb.db, "9780000000019", { fetchFn: empty, now: new Date("2026-09-03T12:00:00Z") });
     expect(empty.mock.calls.length).toBeGreaterThan(calls);
+  });
+
+  it("still finds a book when one source is down", async () => {
+    vi.stubEnv("GOOGLE_BOOKS_API_KEY", "test-key");
+    const fetchFn = vi.fn((async (input: RequestInfo | URL) => {
+      if (String(input).includes("googleapis.com")) {
+        return Response.json({ items: [{ volumeInfo: { title: "Wonder", authors: ["R. J. Palacio"] } }] });
+      }
+      throw new TypeError("fetch failed");
+    }) as Fetch);
+
+    expect(await lookupIsbn(testDb.db, "9780000000033", { fetchFn })).toMatchObject({
+      status: "found",
+      metadata: { title: "Wonder", authors: ["R. J. Palacio"] },
+    });
+    vi.unstubAllEnvs();
   });
 
   it("reports network failures as unavailable without caching them", async () => {

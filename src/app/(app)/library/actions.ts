@@ -22,6 +22,12 @@ import {
 import { isUserFacingError } from "@/server/errors";
 import { type BookMetadata, lookupIsbn } from "@/server/isbn-lookup";
 import { requireTeacher } from "@/server/session";
+import {
+  scanShelf,
+  shelfScanConfigured,
+  ShelfScanUnavailableError,
+  type SpineMatch,
+} from "@/server/shelf-scan";
 
 function handleError(error: unknown): { ok: false; message: string } {
   if (isUserFacingError(error)) return fail(error.message);
@@ -216,5 +222,44 @@ export async function deleteCopyAction(bookId: string, copyId: string): Promise<
     return ok();
   } catch (error) {
     return handleError(error);
+  }
+}
+
+const MAX_PHOTO_BYTES = 6 * 1024 * 1024;
+const PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
+
+export type ShelfScanActionResult =
+  | { status: "scanned"; matches: SpineMatch[]; unmatched: number }
+  | { status: "unconfigured" }
+  | { status: "invalid"; message: string }
+  | { status: "unavailable"; message: string };
+
+/**
+ * Reads a shelf photo and proposes books for it. Adds nothing: everything returned is a
+ * suggestion for the teacher to confirm, and confirming goes through `quickAddAction`
+ * like any other scan. The photo is never written to disk or to the database.
+ */
+export async function scanShelfAction(formData: FormData): Promise<ShelfScanActionResult> {
+  await requireTeacher();
+  if (!shelfScanConfigured()) return { status: "unconfigured" };
+
+  const photo = formData.get("photo");
+  if (!(photo instanceof File)) return { status: "invalid", message: "Choose a photo of a shelf." };
+  if (photo.size === 0) return { status: "invalid", message: "That photo was empty." };
+  if (photo.size > MAX_PHOTO_BYTES) {
+    return { status: "invalid", message: "That photo is too large. Try again with a single shelf." };
+  }
+  const mimeType = PHOTO_TYPES.find((type) => type === photo.type);
+  if (!mimeType) return { status: "invalid", message: "Photos need to be JPEG, PNG or WebP." };
+
+  try {
+    const scan = await scanShelf({ data: await photo.arrayBuffer(), mimeType });
+    return { status: "scanned", matches: scan.matches, unmatched: scan.unmatched };
+  } catch (error) {
+    if (error instanceof ShelfScanUnavailableError) {
+      console.warn(`Shelf scan unavailable: ${error.message}`);
+      return { status: "unavailable", message: "Couldn't read the photo just now. Try again in a moment." };
+    }
+    return { status: "unavailable", message: handleError(error).message };
   }
 }

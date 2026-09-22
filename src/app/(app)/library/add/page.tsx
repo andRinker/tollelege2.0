@@ -10,6 +10,12 @@ import { AddBooks } from "./add-books";
 
 export const metadata: Metadata = { title: "Add books" };
 
+// Server actions run inside this page's function, and scanShelfAction reads a photo and
+// then searches two catalogues for every spine — around 20 seconds for a full shelf.
+// Vercel's default is far higher, but naming it here keeps the feature working if that
+// project default is ever lowered, and still caps a runaway scan.
+export const maxDuration = 60;
+
 export default async function AddBooksPage() {
   const { teacherId } = await requireTeacher();
   const [settings, summary] = await Promise.all([getRequestSettings(), catalogSummary(getDb(), teacherId)]);

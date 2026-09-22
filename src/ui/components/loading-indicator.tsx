@@ -39,7 +39,9 @@ export function LoadingIndicator({ size = BOX, contained = false, label = "Loadi
     const shapes = SEQUENCE.map(getShapeRadii);
     const start = performance.now();
     let frame = requestAnimationFrame(function tick(now) {
-      const elapsed = now - start;
+      // A frame's timestamp can predate the `start` taken just before requesting it, and a
+      // negative elapsed makes `step` -1, which indexes past the front of `shapes`.
+      const elapsed = Math.max(0, now - start);
       const step = Math.floor(elapsed / MORPH_MS);
       const progress = springProgress(elapsed - step * MORPH_MS);
       const radii = morphRadii(shapes[step % shapes.length], shapes[(step + 1) % shapes.length], progress);
