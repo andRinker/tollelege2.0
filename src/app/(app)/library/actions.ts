@@ -13,6 +13,7 @@ import {
   deleteBook,
   deleteCopy,
   findBookByIsbn,
+  listBookIdentities,
   quickAddByIsbn,
   type QuickAddResult,
   setCopyStatus,
@@ -25,8 +26,8 @@ import { requireTeacher } from "@/server/session";
 import {
   scanShelf,
   shelfScanConfigured,
+  type ShelfProposal,
   ShelfScanUnavailableError,
-  type SpineMatch,
 } from "@/server/shelf-scan";
 
 function handleError(error: unknown): { ok: false; message: string } {
@@ -229,7 +230,7 @@ const MAX_PHOTO_BYTES = 6 * 1024 * 1024;
 const PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
 
 export type ShelfScanActionResult =
-  | { status: "scanned"; matches: SpineMatch[]; unmatched: number }
+  | { status: "scanned"; proposals: ShelfProposal[]; unmatched: number }
   | { status: "unconfigured" }
   | { status: "invalid"; message: string }
   | { status: "unavailable"; message: string };
@@ -240,7 +241,7 @@ export type ShelfScanActionResult =
  * like any other scan. The photo is never written to disk or to the database.
  */
 export async function scanShelfAction(formData: FormData): Promise<ShelfScanActionResult> {
-  await requireTeacher();
+  const { teacherId } = await requireTeacher();
   if (!shelfScanConfigured()) return { status: "unconfigured" };
 
   const photo = formData.get("photo");
@@ -253,8 +254,11 @@ export async function scanShelfAction(formData: FormData): Promise<ShelfScanActi
   if (!mimeType) return { status: "invalid", message: "Photos need to be JPEG, PNG or WebP." };
 
   try {
-    const scan = await scanShelf({ data: await photo.arrayBuffer(), mimeType });
-    return { status: "scanned", matches: scan.matches, unmatched: scan.unmatched };
+    // The teacher's own catalogue goes in, so a second printing of a book they already
+    // have offers another copy instead of quietly creating a duplicate title.
+    const owned = await listBookIdentities(getDb(), teacherId);
+    const scan = await scanShelf({ data: await photo.arrayBuffer(), mimeType }, { owned });
+    return { status: "scanned", proposals: scan.proposals, unmatched: scan.unmatched };
   } catch (error) {
     if (error instanceof ShelfScanUnavailableError) {
       console.warn(`Shelf scan unavailable: ${error.message}`);

@@ -9,7 +9,9 @@ import {
   createBook,
   deleteBook,
   deleteCopy,
+  findBookByIsbn,
   getBookDetail,
+  listBookIdentities,
   listBooks,
   normalizeTags,
   quickAddByIsbn,
@@ -91,6 +93,25 @@ describe("catalog", () => {
     await expect(createBook(db, teacher, bookInput({ title: "Wonder again", isbn13: "9780375869020" }))).rejects.toBeInstanceOf(ConflictError);
     // Another teacher can own the same ISBN.
     await expect(createBook(db, otherTeacher, bookInput({ title: "Wonder", isbn13: "9780375869020" }))).resolves.toBeDefined();
+  });
+
+  it("lists book identities with a live copy count", async () => {
+    const { bookId } = await createBook(db, teacher, bookInput({ title: "Frindle", isbn13: "9780689818769" }), 3);
+    const identities = await listBookIdentities(db, teacher);
+    const frindle = identities.find((identity) => identity.id === bookId);
+    expect(frindle?.copies).toBe(3);
+    expect(frindle).toMatchObject({ title: "Frindle", isbn13: "9780689818769" });
+    // Only this teacher's shelves, so a scan can never recognise someone else's book.
+    expect(await listBookIdentities(db, otherTeacher)).not.toContainEqual(expect.objectContaining({ id: bookId }));
+  });
+
+  it("reports how many copies an owned book has", async () => {
+    // This count reaches the teacher as "You have N copies" when they look up an ISBN
+    // they already own, and read 0 for every book until the query was fixed.
+    const { bookId } = await createBook(db, teacher, bookInput({ title: "Bud, Not Buddy", isbn13: "9780553494105" }), 2);
+    const found = await findBookByIsbn(db, teacher, "9780553494105");
+    expect(found).toMatchObject({ id: bookId, totalCopies: 2 });
+    expect(await findBookByIsbn(db, otherTeacher, "9780553494105")).toBeNull();
   });
 
   it("adds copies after the highest copy number", async () => {

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { matchSpine } from "@/server/shelf-scan/match";
+import { findOwned } from "@/server/shelf-scan/owned";
 import { readSpines } from "@/server/shelf-scan/vision";
 
 type Volume = { title: string; authors: string[]; isbn13: string };
@@ -127,5 +128,50 @@ describe("reading spines from a photo", () => {
   it("refuses to run without a key rather than failing silently", async () => {
     vi.stubEnv("GEMINI_API_KEY", "");
     await expect(readSpines(image, geminiReturning([]))).rejects.toThrow(/GEMINI_API_KEY/);
+  });
+});
+
+describe("recognising a book already on the shelves", () => {
+  const shelf = [
+    { id: "book-1", title: "Charlotte's Web", authors: ["E. B. White"], isbn13: "9780064400558", copies: 2 },
+    { id: "book-2", title: "Hatchet", authors: ["Gary Paulsen"], isbn13: null, copies: 1 },
+  ];
+
+  function match(reading: { title: string; author: string | null }, isbns: string[]) {
+    return {
+      reading,
+      candidates: isbns.map((isbn13) => ({
+        isbn13,
+        title: reading.title,
+        authors: reading.author ? [reading.author] : [],
+        coverUrl: null,
+        confidence: "exact" as const,
+      })),
+    };
+  }
+
+  it("matches on ISBN when the same edition is already owned", () => {
+    const owned = findOwned(match({ title: "Charlotte's Web", author: "E. B. White" }, ["9780064400558"]), shelf);
+    expect(owned).toMatchObject({ bookId: "book-1", copies: 2, via: "isbn" });
+  });
+
+  it("still recognises the book when the shelf copy is a different printing", () => {
+    // The bug this fixes: a different ISBN used to create a second "Charlotte's Web".
+    const owned = findOwned(match({ title: "Charlotte's Web", author: "E. B. White" }, ["9780060263850"]), shelf);
+    expect(owned).toMatchObject({ bookId: "book-1", via: "title" });
+  });
+
+  it("recognises a book catalogued without an ISBN at all", () => {
+    const owned = findOwned(match({ title: "Hatchet", author: "Gary Paulsen" }, ["9781442403321"]), shelf);
+    expect(owned).toMatchObject({ bookId: "book-2", via: "title" });
+  });
+
+  it("does not claim a book the teacher does not have", () => {
+    expect(findOwned(match({ title: "Holes", author: "Louis Sachar" }, ["9780440228592"]), shelf)).toBeNull();
+  });
+
+  it("does not match a same-named book by a different author", () => {
+    const owned = findOwned(match({ title: "Charlotte's Web", author: "Someone Else" }, ["9781111111111"]), shelf);
+    expect(owned).toBeNull();
   });
 });

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { BookCover } from "@/components/book-cover";
-import type { MatchCandidate, SpineMatch } from "@/server/shelf-scan";
+import type { MatchCandidate, ShelfProposal } from "@/server/shelf-scan";
 import { cx } from "@/ui/cx";
 import { Button } from "@/ui/components/button";
 import { Dialog } from "@/ui/components/dialog";
@@ -18,13 +18,13 @@ import {
   iconPhotoCamera,
   iconRefresh,
 } from "@/ui/icons/generated";
-import { quickAddAction, scanShelfAction } from "../actions";
+import { addCopyAction, quickAddAction, scanShelfAction } from "../actions";
 
 /** Big enough for the reader to make out a spine, small enough to upload over a classroom's wifi. */
 const MAX_EDGE = 1600;
 
 type Row = {
-  match: SpineMatch;
+  proposal: ShelfProposal;
   /** Which of the candidate editions the teacher has picked. */
   chosen: number;
   selected: boolean;
@@ -88,11 +88,19 @@ export function ShelfScanDialog({ isOpen, onOpenChange }: { isOpen: boolean; onO
       return;
     }
 
-    const rows: Row[] = result.matches
-      .filter((match) => match.candidates.length > 0)
-      // A doubtful suggestion starts unticked, so nothing wrong is added by simply not looking.
-      .map((match) => ({ match, chosen: 0, selected: match.candidates[0].confidence !== "weak" }));
-    const unreadable = result.matches.filter((match) => match.candidates.length === 0).map((match) => match.reading.title);
+    const rows: Row[] = result.proposals
+      .filter((proposal) => proposal.candidates.length > 0)
+      .map((proposal) => ({
+        proposal,
+        chosen: 0,
+        // Two kinds of row start unticked: a doubtful match, so nothing wrong is added by
+        // simply not looking, and a book already on the shelves, since re-photographing a
+        // catalogued shelf should not silently multiply its copies.
+        selected: proposal.candidates[0].confidence !== "weak" && !proposal.owned,
+      }));
+    const unreadable = result.proposals
+      .filter((proposal) => proposal.candidates.length === 0)
+      .map((proposal) => proposal.reading.title);
     setState({ kind: "review", rows, unreadable });
   }
 
@@ -101,21 +109,33 @@ export function ShelfScanDialog({ isOpen, onOpenChange }: { isOpen: boolean; onO
     setState({ kind: "adding", done: 0, total: chosen.length });
 
     let added = 0;
+    let copied = 0;
     let failed = 0;
     for (const [index, row] of chosen.entries()) {
-      const result = await quickAddAction(row.match.candidates[row.chosen].isbn13);
-      if (result.status === "added") added += 1;
-      else failed += 1;
+      if (row.proposal.owned) {
+        // Already catalogued, so this is another physical copy of a book that exists.
+        const result = await addCopyAction(row.proposal.owned.bookId);
+        if (result.ok) copied += 1;
+        else failed += 1;
+      } else {
+        const result = await quickAddAction(row.proposal.candidates[row.chosen].isbn13);
+        if (result.status === "added") added += 1;
+        else failed += 1;
+      }
       setState({ kind: "adding", done: index + 1, total: chosen.length });
     }
 
     close();
     reset();
+    const parts = [
+      added > 0 && `${added} ${added === 1 ? "book" : "books"}`,
+      copied > 0 && `${copied} ${copied === 1 ? "copy" : "copies"}`,
+    ].filter(Boolean);
     showSnackbar({
       message:
         failed === 0
-          ? `Added ${added} ${added === 1 ? "book" : "books"} from the shelf.`
-          : `Added ${added}, but ${failed} couldn't be added.`,
+          ? `Added ${parts.join(" and ")} from the shelf.`
+          : `Added ${parts.join(" and ") || "nothing"}, but ${failed} couldn't be added.`,
     });
   }
 
@@ -258,10 +278,19 @@ function ReviewList({
 
       <ul className="flex flex-col gap-1">
         {rows.map((row, index) => {
-          const candidate = row.match.candidates[row.chosen];
-          const label = CONFIDENCE_LABEL[candidate.confidence];
+          const candidate = row.proposal.candidates[row.chosen];
+          const owned = row.proposal.owned;
+          const label = owned
+            ? {
+                text:
+                  owned.copies === 1
+                    ? "Already on your shelves — ticking adds a second copy"
+                    : `Already on your shelves (${owned.copies} copies) — ticking adds another`,
+                className: "text-on-surface-variant",
+              }
+            : CONFIDENCE_LABEL[candidate.confidence];
           return (
-            <li key={`${row.match.reading.title}-${index}`} className="flex items-center gap-3 rounded-lg px-1 py-2">
+            <li key={`${row.proposal.reading.title}-${index}`} className="flex items-center gap-3 rounded-lg px-1 py-2">
               <Checkbox
                 isSelected={row.selected}
                 onChange={(selected) => update(index, { selected })}
@@ -272,13 +301,13 @@ function ReviewList({
                 <BookCover title={candidate.title} coverUrl={candidate.coverUrl} size="sm" />
               </div>
               <div className="min-w-0 grow">
-                <p className="truncate text-body-lg">{candidate.title}</p>
+                <p className="truncate text-body-lg">{owned ? owned.title : candidate.title}</p>
                 <p className="truncate text-body-sm text-on-surface-variant">
-                  {candidate.authors.join(", ") || row.match.reading.author || "Unknown author"}
+                  {candidate.authors.join(", ") || row.proposal.reading.author || "Unknown author"}
                 </p>
                 <p className={cx("text-label-sm", label.className)}>{label.text}</p>
               </div>
-              {row.match.candidates.length > 1 && (
+              {!owned && row.proposal.candidates.length > 1 && (
                 <MenuTrigger>
                   <Button variant="text" size="xs">
                     Edition
@@ -291,7 +320,7 @@ function ReviewList({
                       if (!Number.isNaN(next)) update(index, { chosen: next });
                     }}
                   >
-                    {row.match.candidates.map((option, position) => (
+                    {row.proposal.candidates.map((option, position) => (
                       <MenuItem key={option.isbn13} id={String(position)}>
                         {`${option.title} — ${option.authors[0] ?? "Unknown"}`}
                       </MenuItem>
