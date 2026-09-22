@@ -6,11 +6,24 @@ import { useEffect, useRef } from "react";
 const MAX_KEY_GAP_MS = 50;
 const MIN_CODE_LENGTH = 10;
 
+/** Inputs that take no characters, so a burst of digits was never meant for them. */
+const NOT_TYPED_INTO = new Set(["button", "checkbox", "color", "file", "image", "radio", "range", "reset", "submit"]);
+
 function isTextEntry(target: EventTarget | null) {
-  return (
-    target instanceof HTMLElement &&
-    (target.isContentEditable || target.closest("input, textarea, select, [role='dialog'], [role='alertdialog']") !== null)
-  );
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  const field = target.closest("input, textarea, select");
+  // A checkbox is a button that happens to be an `<input>`: React Aria leaves focus on one
+  // whenever the control the teacher just pressed unmounts, and treating that as typing
+  // threw the next scan away. Only a field that actually accepts characters swallows one.
+  if (field && !(field instanceof HTMLInputElement && NOT_TYPED_INTO.has(field.type))) return true;
+  // A dialog swallows scans by default: Enter inside one usually means "press this button".
+  // But when something on the page is expressly waiting for a scan — the shelf review with
+  // a gap armed — the burst belongs to it. That is a whole-document state rather than a
+  // focus one, deliberately: the teacher is at the shelf with a scanner, and whatever the
+  // browser left focused when the row armed itself shouldn't decide where the book lands.
+  if (target.ownerDocument.querySelector("[data-barcode-wedge]") !== null) return false;
+  return target.closest("[role='dialog'], [role='alertdialog']") !== null;
 }
 
 /**

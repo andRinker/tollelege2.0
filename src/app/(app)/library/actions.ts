@@ -27,7 +27,7 @@ import {
   checkPhoto,
   scanShelf,
   shelfScanConfigured,
-  type ShelfProposal,
+  type ShelfSlot,
   ShelfScanUnavailableError,
 } from "@/server/shelf-scan";
 
@@ -223,7 +223,7 @@ export async function deleteCopyAction(bookId: string, copyId: string): Promise<
 }
 
 export type ShelfScanActionResult =
-  | { status: "scanned"; proposals: ShelfProposal[]; unmatched: number }
+  | { status: "scanned"; slots: ShelfSlot[]; needsAttention: number }
   | { status: "unconfigured" }
   | { status: "invalid"; message: string }
   | { status: "unavailable"; message: string };
@@ -245,7 +245,7 @@ export async function scanShelfAction(formData: FormData): Promise<ShelfScanActi
     // have offers another copy instead of quietly creating a duplicate title.
     const owned = await listBookIdentities(getDb(), teacherId);
     const scan = await scanShelf({ data: await photo.data.arrayBuffer(), mimeType: photo.mimeType }, { owned });
-    return { status: "scanned", proposals: scan.proposals, unmatched: scan.unmatched };
+    return { status: "scanned", slots: scan.slots, needsAttention: scan.needsAttention };
   } catch (error) {
     if (error instanceof ShelfScanUnavailableError) {
       console.warn(`Shelf scan unavailable: ${error.message}`);

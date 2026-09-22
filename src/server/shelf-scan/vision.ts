@@ -6,6 +6,20 @@ export type SpineReading = {
   author: string | null;
 };
 
+/**
+ * One spine as the reader saw it, in shelf order.
+ *
+ * A spine it could see but not read is reported rather than dropped. Silently omitting
+ * it is how a shelf of thirty comes back as twenty-eight with nobody any the wiser — and
+ * the teacher standing at the shelf is the one person who can fix it in three seconds.
+ */
+export type SpineSighting = {
+  /** Null when the spine was visible but not legible. */
+  reading: SpineReading | null;
+  /** Whatever *was* legible on an unreadable spine. A partial read, never a guess. */
+  fragment: string | null;
+};
+
 export class ShelfScanUnavailableError extends Error {}
 
 const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta";
@@ -19,35 +33,53 @@ const MAX_READINGS = 60;
 const PROMPT = [
   "This photo shows books on a shelf, viewed from the side so mostly spines are visible.",
   "",
-  'List every book whose spine you can actually read. Return a JSON array of objects with keys "title" and "author".',
+  "List every spine you can see, in order from left to right. Return a JSON array of objects.",
+  "",
+  'For a spine you can genuinely read, set "title", and "author" when an author is printed.',
+  'For a spine you can see but cannot read, set "title" to null and put whatever IS legible in',
+  '"fragment" — a few words of the title, a publisher, a series name. Leave "fragment" null when',
+  "nothing at all is legible.",
   "",
   "Rules:",
-  "- Only include books you can genuinely read. Do not guess, and do not infer a book from context.",
-  '- If you can read a title but not the author, use null for "author".',
+  '- Never guess a title. If you cannot read it, leaving "title" null is the useful answer.',
+  "- Do not infer a book from context, from the books beside it, or from a series it might belong to.",
   "- Do not invent subtitles or series names that are not printed on the spine.",
-  "- Return an empty array if no spines are readable.",
+  "- List only spines actually present in the photo. Do not pad the list out to a round number.",
+  "- Return an empty array if the photo has no books in it.",
 ].join("\n");
 
 const SCHEMA = {
   type: "ARRAY",
   items: {
     type: "OBJECT",
-    properties: { title: { type: "STRING" }, author: { type: "STRING", nullable: true } },
-    required: ["title"],
+    properties: {
+      title: { type: "STRING", nullable: true },
+      author: { type: "STRING", nullable: true },
+      fragment: { type: "STRING", nullable: true },
+    },
   },
 } as const;
 
 export function shelfScanConfigured(): boolean {
-  return Boolean(process.env.GEMINI_API_KEY);
+  return Boolean(process.env.GEMINI_API_KEY) || process.env.SHELF_SCAN_FIXTURES === "1";
 }
 
-function cleanReading(value: unknown): SpineReading | null {
+function text(value: unknown, max: number): string {
+  return typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, max) : "";
+}
+
+function cleanSighting(value: unknown): SpineSighting | null {
   if (!value || typeof value !== "object") return null;
-  const record = value as { title?: unknown; author?: unknown };
-  const title = typeof record.title === "string" ? record.title.replace(/\s+/g, " ").trim() : "";
-  if (!title) return null;
-  const author = typeof record.author === "string" ? record.author.replace(/\s+/g, " ").trim() : "";
-  return { title: title.slice(0, 300), author: author ? author.slice(0, 200) : null };
+  const record = value as { title?: unknown; author?: unknown; fragment?: unknown };
+
+  const title = text(record.title, 300);
+  if (!title) {
+    // A spine it could see but not read. Kept rather than dropped, which is the whole point.
+    const fragment = text(record.fragment, 200);
+    return { reading: null, fragment: fragment || null };
+  }
+  const author = text(record.author, 200);
+  return { reading: { title, author: author || null }, fragment: null };
 }
 
 /**
@@ -58,7 +90,12 @@ function cleanReading(value: unknown): SpineReading | null {
 export async function readSpines(
   image: { data: ArrayBuffer; mimeType: string },
   fetchFn: typeof fetch = fetch,
-): Promise<SpineReading[]> {
+): Promise<SpineSighting[]> {
+  if (process.env.SHELF_SCAN_FIXTURES === "1") {
+    const { FIXTURE_SHELF } = await import("./fixtures");
+    return FIXTURE_SHELF;
+  }
+
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new ShelfScanUnavailableError("GEMINI_API_KEY is not set.");
   const model = process.env.GEMINI_MODEL || DEFAULT_MODEL;
@@ -104,17 +141,21 @@ export async function readSpines(
   }
   if (!Array.isArray(parsed)) return [];
 
-  const readings: SpineReading[] = [];
+  const sightings: SpineSighting[] = [];
   const seen = new Set<string>();
   for (const entry of parsed) {
-    const reading = cleanReading(entry);
-    if (!reading) continue;
-    // Two copies side by side read as two identical spines; the teacher only needs one row.
-    const key = `${reading.title.toLowerCase()}|${reading.author?.toLowerCase() ?? ""}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    readings.push(reading);
-    if (readings.length >= MAX_READINGS) break;
+    const sighting = cleanSighting(entry);
+    if (!sighting) continue;
+    if (sighting.reading) {
+      // Two copies side by side read as two identical spines; the teacher only needs one row.
+      // Unread spines are never folded together: they have no title to be the same by, and
+      // each one is a different book somebody has to go and look at.
+      const key = `${sighting.reading.title.toLowerCase()}|${sighting.reading.author?.toLowerCase() ?? ""}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+    }
+    sightings.push(sighting);
+    if (sightings.length >= MAX_READINGS) break;
   }
-  return readings;
+  return sightings;
 }

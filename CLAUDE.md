@@ -70,6 +70,13 @@ Consequences of that, all deliberate:
 - A spine matching a book already on the shelves offers another **copy**, never a second title — see `owned.ts`.
 - Photos are sent to Google and never stored. `/privacy` says so, and must keep saying so.
 
+**It says what it couldn't finish, and where.** The reader lists every spine left to right, including the ones it can see but not read, so a scan comes back as `slots` in shelf order instead of a bag of matches. The two books in "missed two" above used to vanish without a trace; now they are rows.
+
+- An unreadable spine carries a `fragment`: whatever *was* legible. It is a partial read, **never a guess**. An illegible spine gives a guess almost nothing to go on, and a plausible wrong title is the most expensive failure here, while a position plus one barcode scan is certain and takes seconds.
+- `describeGap` in `src/lib/shelf-gaps.ts` places a gap by its nearest known neighbours ("2nd of 3, between X and Y"). A spine read but matched by no catalogue still anchors, because the teacher can see its title, and so does a gap already filled, so the list tightens as it is worked.
+- Each gap offers Scan it, Type ISBN and By hand. **Scan it** arms the row: the next barcode from the phone or a USB scanner lands there through `addBookByScan` like any other. Dialogs normally swallow a wedge burst, so the armed review opts back in with `data-barcode-wedge`.
+- `SHELF_SCAN_FIXTURES=1` swaps the reader and the catalogue for the canned, deliberately awkward shelf in `fixtures.ts`, so the review can run without a Gemini key. The e2e suite runs with it on. Its ISBNs must also be in `isbn-lookup/fixtures.ts`, because confirming the shelf adds each book through the ordinary lookup.
+
 ## Borrowing a phone as a scanner
 
 A teacher whose school account won't sign in on their phone — a managed device that turns a work Google account into an enrolment prompt — still needs the camera in their pocket. `/library/add` shows a QR code; the phone opens `/scan` and becomes a barcode scanner without ever signing in.
