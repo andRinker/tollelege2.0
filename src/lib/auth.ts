@@ -11,7 +11,8 @@ export const isGoogleSignInEnabled = Boolean(
   process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET,
 );
 
-function resolveBaseUrl(): string {
+/** The public origin of this deployment. Also what a QR code has to point a phone at. */
+export function resolveBaseUrl(): string {
   if (process.env.BETTER_AUTH_URL) return process.env.BETTER_AUTH_URL;
   // Production uses its stable domain, so links and the Google redirect URI never point at a one-off deployment URL.
   if (process.env.VERCEL_ENV === "production" && process.env.VERCEL_PROJECT_PRODUCTION_URL) {

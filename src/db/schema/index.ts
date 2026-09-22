@@ -7,4 +7,5 @@ export * from "./isbn-cache";
 export * from "./lending";
 export * from "./relations";
 export * from "./roster";
+export * from "./scanning";
 export * from "./settings";

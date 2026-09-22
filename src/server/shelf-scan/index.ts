@@ -14,6 +14,22 @@ const CONCURRENCY = 6;
 /** A matched spine, plus the book the teacher already owns for it. */
 export type ShelfProposal = SpineMatch & { owned: OwnedBook | null };
 
+/** What a shelf photo may be, wherever it arrives from — a server action or a paired phone. */
+export const MAX_PHOTO_BYTES = 6 * 1024 * 1024;
+export const PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
+
+export type PhotoProblem = { message: string } | null;
+
+/** The one place that decides whether an uploaded file is a usable shelf photo. */
+export function checkPhoto(photo: unknown): { data: File; mimeType: (typeof PHOTO_TYPES)[number] } | { error: string } {
+  if (!(photo instanceof File)) return { error: "Choose a photo of a shelf." };
+  if (photo.size === 0) return { error: "That photo was empty." };
+  if (photo.size > MAX_PHOTO_BYTES) return { error: "That photo is too large. Try again with a single shelf." };
+  const mimeType = PHOTO_TYPES.find((type) => type === photo.type);
+  if (!mimeType) return { error: "Photos need to be JPEG, PNG or WebP." };
+  return { data: photo, mimeType };
+}
+
 export type ShelfScan = {
   /** One entry per spine the reader could make out, in shelf order. */
   proposals: ShelfProposal[];

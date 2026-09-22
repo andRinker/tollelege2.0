@@ -70,6 +70,23 @@ Consequences of that, all deliberate:
 - A spine matching a book already on the shelves offers another **copy**, never a second title — see `owned.ts`.
 - Photos are sent to Google and never stored. `/privacy` says so, and must keep saying so.
 
+## Borrowing a phone as a scanner
+
+A teacher whose school account won't sign in on their phone — a managed device that turns a work Google account into an enrolment prompt — still needs the camera in their pocket. `/library/add` shows a QR code; the phone opens `/scan` and becomes a barcode scanner without ever signing in.
+
+The QR carries a **capability, not a session**. `src/server/scan-pairing.ts` owns it, and everything the phone can do is three route handlers under `src/app/api/scan/`: add a book by ISBN, send a shelf photo, claim the pairing. There is no fourth. It cannot read the library, the roster, or anything else, and `/api/scan/feed` — the only read — is authenticated by the teacher's own cookie, so a phone writes to the feed and can never read it.
+
+Consequences, all deliberate:
+
+- The token is 32 random bytes, stored **only as a SHA-256 hash**, and travels in the URL's **fragment**, which browsers never send to a server. It stays out of access logs, referrers and history sync, and `/scan` wipes it from the address bar as soon as it has read it.
+- **The first phone to open a code keeps it.** Later devices are refused. A code photographed off a teacher's screen is useless once their own phone has claimed it — and if it is grabbed first, their phone is refused and they find out, which is the failure worth having.
+- A pairing dies at **local midnight in the teacher's time zone**, capped at a day, and signing out revokes every one.
+- The phone's request is what performs the add, so the laptop can sleep through half a shelf and lose nothing; it reads the backlog from `scan_events` when it wakes, from a cursor the page rendered with.
+- Rate limits are counted from `scan_events` rather than memory, because serverless instances don't share memory. Shelf photos have their own much tighter allowance, since each one is a Gemini call.
+- A shelf photo from the phone still **proposes**; the teacher confirms it in the browser exactly as always. A device with no account does not get to add books it merely thinks it recognised.
+- `addBookByScan` in `src/server/quick-add.ts` is the one path a scanned barcode takes, whether it came from the USB wedge, the laptop camera or a phone. Scanning the same shelf two ways must give the same library.
+- Anything shown about when a pairing expires is formatted **on the server** in the teacher's time zone. Formatting a time in the browser renders one thing on the server and another after hydration.
+
 ## Lending library
 
 `src/server/connections.ts` links two teachers; `src/server/lending.ts` moves a book between them. Teachers connect one pair at a time — an invitation by email, accepted by the other — and `teacher_connections` stores the pair normalised (`teacher_a_id < teacher_b_id`) so one pair can only ever have one row. Once connected, each sees the other's titles; `books.lendable` defaults to true and is the per-title exception, for class sets.
