@@ -1,6 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
-import { createClassWithStudents, firstHref, rapidAdd, signUp, snackbar } from "./helpers";
+import { createClassWithStudents, firstHref, rapidAdd, settledSnackbar, signUp } from "./helpers";
 
 async function expectNoSeriousViolations(page: Page, name: string) {
   const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]).analyze();
@@ -36,7 +36,7 @@ test("app screens have no serious accessibility violations", async ({ page }) =>
   const isbn = page.getByRole("textbox", { name: "Scan or type the book's ISBN" });
   await isbn.fill("9780064440202");
   await isbn.press("Enter");
-  await expect(snackbar(page, /checked out to Lena/)).toBeVisible();
+  await settledSnackbar(page, /checked out to Lena/);
   await expectNoSeriousViolations(page, "checkout with a session");
 
   for (const path of ["/dashboard", "/library", bookPath, "/library/add", "/classes", classPath, studentPath, "/checkout", "/checkin", "/settings"]) {

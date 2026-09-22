@@ -29,6 +29,30 @@ export function snackbar(page: Page, text: string | RegExp) {
   return page.getByRole("status").getByText(text);
 }
 
+/**
+ * Waits for a snackbar to finish fading in. `toBeVisible()` resolves as soon as the
+ * element is laid out, which on a slow machine is partway through the fade — and axe
+ * reads a half-transparent message as a real colour-contrast failure.
+ */
+export async function settledSnackbar(page: Page, text: string | RegExp) {
+  const message = snackbar(page, text);
+  await expect(message).toBeVisible();
+  await expect
+    .poll(() =>
+      message.evaluate((element) => {
+        let node: HTMLElement | null = element as HTMLElement;
+        let lowest = 1;
+        while (node) {
+          lowest = Math.min(lowest, Number(getComputedStyle(node).opacity || "1"));
+          node = node.parentElement;
+        }
+        return lowest;
+      }),
+    )
+    .toBeGreaterThan(0.99);
+  return message;
+}
+
 export async function createClassWithStudents(page: Page, className: string, names: string[]) {
   await page.goto("/classes");
   await page.getByRole("button", { name: "New class" }).first().click();
@@ -54,8 +78,20 @@ export async function rapidAdd(page: Page, isbns: string[]) {
 }
 
 export async function firstHref(page: Page, pattern: RegExp) {
-  const hrefs = await page.locator("a[href]").evaluateAll((links) => links.map((link) => link.getAttribute("href") ?? ""));
-  const href = hrefs.find((candidate) => pattern.test(candidate));
-  expect(href, `a link matching ${pattern}`).toBeTruthy();
+  // A single snapshot races the revalidation that puts these links on the page, so poll
+  // the way a locator assertion would rather than reading the DOM once.
+  let href: string | undefined;
+  await expect
+    .poll(
+      async () => {
+        const hrefs = await page
+          .locator("a[href]")
+          .evaluateAll((links) => links.map((link) => link.getAttribute("href") ?? ""));
+        href = hrefs.find((candidate) => pattern.test(candidate));
+        return href ?? null;
+      },
+      { message: `a link matching ${pattern}` },
+    )
+    .not.toBeNull();
   return href!;
 }
