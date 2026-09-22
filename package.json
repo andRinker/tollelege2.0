@@ -8,6 +8,7 @@
   "scripts": {
     "predev": "node scripts/prepare-assets.mjs",
     "dev": "next dev",
+    "dev:phone": "node scripts/dev-phone.mjs",
     "prebuild": "node scripts/prepare-assets.mjs",
     "build": "next build",
     "prevercel-build": "node scripts/prepare-assets.mjs",
