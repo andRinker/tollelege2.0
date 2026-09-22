@@ -16,6 +16,7 @@ import {
   listBookIdentities,
   quickAddByIsbn,
   type QuickAddResult,
+  setBookLendable,
   setCopyStatus,
   undoQuickAdd,
   updateBookDetails,
@@ -183,6 +184,19 @@ export async function deleteBookAction(bookId: string): Promise<ActionResult> {
   try {
     await deleteBook(getDb(), teacherId, bookId);
     revalidateLibrary();
+    return ok();
+  } catch (error) {
+    return handleError(error);
+  }
+}
+
+export async function setBookLendableAction(bookId: string, lendable: boolean): Promise<ActionResult> {
+  const { teacherId } = await requireTeacher();
+  if (!id.safeParse(bookId).success) return fail("That book wasn't found.");
+  try {
+    await setBookLendable(getDb(), teacherId, bookId, Boolean(lendable));
+    revalidateLibrary(bookId);
+    revalidatePath("/lending", "layout");
     return ok();
   } catch (error) {
     return handleError(error);

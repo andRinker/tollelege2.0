@@ -1,7 +1,7 @@
-import { and, asc, count, desc, eq, ilike, inArray, isNull, notExists, or, type SQL, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, inArray, isNull, ne, notExists, or, type SQL, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { Database } from "@/db/client";
-import { books, copies, loans, shelfLoans, user } from "@/db/schema";
+import { books, copies, loans, shelfLoans, teacherConnections, user } from "@/db/schema";
 import { requireConnection } from "./connections";
 import { ConflictError, isUniqueViolation, NotFoundError } from "./errors";
 
@@ -503,6 +503,29 @@ export async function listShelfLoans(db: Database, teacherId: string, today: str
     }
   }
   return view;
+}
+
+/**
+ * How many things are waiting on this teacher in the lending library: books another
+ * teacher has asked for, and invitations to connect. Drives the navigation badge, so it
+ * runs on every page and stays to two indexed counts.
+ */
+export async function lendingAttentionCount(db: Database, teacherId: string): Promise<number> {
+  const [requests] = await db
+    .select({ waiting: count() })
+    .from(shelfLoans)
+    .where(and(eq(shelfLoans.ownerTeacherId, teacherId), eq(shelfLoans.status, "requested")));
+  const [invitations] = await db
+    .select({ waiting: count() })
+    .from(teacherConnections)
+    .where(
+      and(
+        eq(teacherConnections.status, "pending"),
+        ne(teacherConnections.requestedById, teacherId),
+        or(eq(teacherConnections.teacherAId, teacherId), eq(teacherConnections.teacherBId, teacherId)),
+      ),
+    );
+  return requests.waiting + invitations.waiting;
 }
 
 /** Counts for the dashboard and the navigation badge. */

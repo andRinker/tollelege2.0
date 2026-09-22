@@ -75,8 +75,20 @@ export default function PrivacyPage() {
 
         <Section title="Who can see your data">
           <p>
-            Each teacher&rsquo;s library, classes, students, and checkout history are private to that teacher&rsquo;s account.
-            Other teachers can&rsquo;t see or change them.
+            Your classes, your students, and your checkout history are private to your account. No other teacher can see
+            them, whatever else you share.
+          </p>
+          <p>
+            Your book catalog is private too, until you connect with another teacher. Connecting takes an invitation from
+            one of you and acceptance by the other, and either of you can undo it at any time. While you are connected,
+            that teacher can see the titles you offer for lending &mdash; the title, authors, cover, reading level, tags,
+            and how many copies are free &mdash; along with your name and email address. They never see your private notes
+            on a book, where you shelve it, or who has borrowed it.
+          </p>
+          <p>
+            Every title is offered by default so that a connected teacher&rsquo;s shelves aren&rsquo;t empty. You can hold
+            any title back from the book&rsquo;s own page, and a book you have borrowed is never offered on to a third
+            teacher.
           </p>
           <p>We don&rsquo;t sell your data, share it with advertisers, or use it for advertising. {APP_NAME} has no ads and no third-party analytics.</p>
         </Section>

@@ -41,7 +41,7 @@ npx vercel link && npx vercel env pull .env.local
 
 ## Rules
 
-- **Tenant isolation.** Teacher data is always filtered by `teacher_id`, and the teacher ID comes only from `requireTeacher()` in `src/server/session.ts` — never from client input. Data-access functions live in `src/server/*` with the signature `(db, teacherId, input)`.
+- **Tenant isolation.** Teacher data is always filtered by `teacher_id`, and the teacher ID comes only from `requireTeacher()` in `src/server/session.ts` — never from client input. Data-access functions live in `src/server/*` with the signature `(db, teacherId, input)`. The lending library is the one place two teachers meet, and it goes through `shelf_loans` — see below. Nothing else crosses.
 - Tables holding teacher data need a `teacher_id` column, a unique `(id, teacher_id)` constraint, and composite foreign keys `(parent_id, teacher_id)` to their parents.
 - `src/proxy.ts` only redirects optimistically on cookie presence. Every page, layout, and server action must call `requireTeacher()`.
 - Schema files in `src/db/schema/` use relative imports, because drizzle-kit loads them without path aliases.
@@ -69,3 +69,18 @@ Consequences of that, all deliberate:
 - Several candidate editions are kept per spine. A classic read correctly is routinely the wrong printing.
 - A spine matching a book already on the shelves offers another **copy**, never a second title — see `owned.ts`.
 - Photos are sent to Google and never stored. `/privacy` says so, and must keep saying so.
+
+## Lending library
+
+`src/server/connections.ts` links two teachers; `src/server/lending.ts` moves a book between them. Teachers connect one pair at a time — an invitation by email, accepted by the other — and `teacher_connections` stores the pair normalised (`teacher_a_id < teacher_b_id`) so one pair can only ever have one row. Once connected, each sees the other's titles; `books.lendable` defaults to true and is the per-title exception, for class sets.
+
+**The copy never changes owner.** Approving a request flips the owner's copy to `lent_out` — which drops it out of their own checkout queries, since those already filter on `in_circulation` — and creates a stand-in copy on the borrower's shelf. The borrower's students check that stand-in out through the ordinary flow, which is why none of `circulation.ts` needed changing.
+
+Consequences, all deliberate:
+
+- `shelf_loans` is the only table holding two teacher IDs, and it reaches each library through a composite `(id, teacher_id)` foreign key. A row pairing one teacher's copy with another's shelf is rejected by the database, not by a query someone has to remember to write.
+- The stand-in folds into the borrower's existing title when they already own the ISBN, the same way a shelf photo offers a copy rather than a duplicate.
+- Returning **withdraws** the stand-in rather than deleting it once a student has read it, so the borrower's checkout history outlives the loan. With no history it is deleted, along with the title if that was its only copy.
+- A borrowed copy is never offered on to a third teacher, and `assertNotInShelfLoan` blocks deleting or restatusing anything currently away.
+- Set `shelf_loans.borrower_copy_id` to null **before** deleting a stand-in copy: the foreign key cascades, and deleting the copy first takes the loan record with it.
+- What a connected teacher can see is written down in `/privacy`, and must keep matching what `browseShelf` actually selects.

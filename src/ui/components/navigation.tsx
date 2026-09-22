@@ -7,11 +7,14 @@ import { cx } from "@/ui/cx";
 import { iconMenu, iconMenuOpen, type IconData } from "@/ui/icons/generated";
 import { Icon } from "./icon";
 import { IconButton } from "./icon-button";
+import { Badge } from "./surfaces";
 
 export type NavDestination = {
   href: string;
   label: string;
   icon: IconData;
+  /** Shown on the icon when something is waiting there. Hidden at zero. */
+  badge?: { count: number; label: string };
 };
 
 function useIsActive() {
@@ -45,6 +48,9 @@ function VerticalItem({ destination, active, compact }: { destination: NavDestin
       >
         <span className={INDICATOR} />
         <Icon icon={destination.icon} filled={active} />
+        {Boolean(destination.badge?.count) && (
+          <Badge count={destination.badge?.count} label={destination.badge?.label} className="absolute top-0 right-3" />
+        )}
       </span>
       <span className="max-w-full truncate px-1 text-label-md text-on-surface-variant group-aria-[current=page]/nav:text-label-md-em group-aria-[current=page]/nav:text-secondary">
         {destination.label}
@@ -69,6 +75,9 @@ function HorizontalItem({ destination, active }: { destination: NavDestination; 
         <span className={INDICATOR} />
         <Icon icon={destination.icon} filled={active} />
         <span className="text-label-lg group-aria-[current=page]/nav:text-label-lg-em">{destination.label}</span>
+        {Boolean(destination.badge?.count) && (
+          <Badge count={destination.badge?.count} label={destination.badge?.label} className="ml-auto" />
+        )}
       </span>
     </AriaLink>
   );

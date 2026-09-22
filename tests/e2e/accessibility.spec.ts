@@ -39,7 +39,7 @@ test("app screens have no serious accessibility violations", async ({ page }) =>
   await settledSnackbar(page, /checked out to Lena/);
   await expectNoSeriousViolations(page, "checkout with a session");
 
-  for (const path of ["/dashboard", "/library", bookPath, "/library/add", "/classes", classPath, studentPath, "/checkout", "/checkin", "/settings"]) {
+  for (const path of ["/dashboard", "/library", bookPath, "/library/add", "/classes", classPath, studentPath, "/checkout", "/checkin", "/lending", "/settings"]) {
     await page.goto(path);
     await page.waitForLoadState("networkidle");
     await expectNoSeriousViolations(page, path);

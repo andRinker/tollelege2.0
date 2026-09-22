@@ -21,13 +21,47 @@ import {
   iconReport,
   iconRestartAlt,
 } from "@/ui/icons/generated";
+import { Switch } from "@/ui/components/selection-controls";
 import {
   addCopyAction,
   deleteBookAction,
   deleteCopyAction,
+  setBookLendableAction,
   setCopyStatusAction,
   updateBookAction,
 } from "../actions";
+
+/**
+ * Whether connected teachers see this title on the shelves they can borrow from. On by
+ * default, so the exception is the class set a teacher needs all thirty copies of.
+ */
+export function LendableSwitch({ bookId, lendable }: { bookId: string; lendable: boolean }) {
+  const showSnackbar = useSnackbar();
+  const [offered, setOffered] = useState(lendable);
+
+  return (
+    <Switch
+      isSelected={offered}
+      onChange={async (next) => {
+        setOffered(next);
+        const result = await setBookLendableAction(bookId, next);
+        if (!result.ok) {
+          setOffered(!next);
+          showSnackbar({ message: result.message });
+        }
+      }}
+    >
+      <span className="flex flex-col gap-0.5">
+        <span className="text-body-lg text-on-surface">Offer to connected teachers</span>
+        <span className="text-body-sm text-on-surface-variant">
+          {offered
+            ? "Teachers you're connected to can ask to borrow a copy."
+            : "Held back. Nobody else can see this title on your shelves."}
+        </span>
+      </span>
+    </Switch>
+  );
+}
 
 type Book = typeof books.$inferSelect;
 
