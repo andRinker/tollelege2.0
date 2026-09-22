@@ -20,8 +20,18 @@ export type ThemeContrast = (typeof themeContrasts)[number];
 export const metadataSources = ["openlibrary", "google_books", "manual"] as const;
 export type MetadataSource = (typeof metadataSources)[number];
 
-export const copyStatuses = ["in_circulation", "lost", "damaged", "withdrawn"] as const;
+export const copyStatuses = ["in_circulation", "lent_out", "lost", "damaged", "withdrawn"] as const;
 export type CopyStatus = (typeof copyStatuses)[number];
+
+/** The statuses a teacher sets by hand. `lent_out` is owned by the lending library. */
+export const manualCopyStatuses = ["in_circulation", "lost", "damaged", "withdrawn"] as const;
+export type ManualCopyStatus = (typeof manualCopyStatuses)[number];
+
+export const connectionStatuses = ["pending", "accepted"] as const;
+export type ConnectionStatus = (typeof connectionStatuses)[number];
+
+export const shelfLoanStatuses = ["requested", "declined", "cancelled", "active", "returned"] as const;
+export type ShelfLoanStatus = (typeof shelfLoanStatuses)[number];
 
 export const closeReasons = ["returned", "lost"] as const;
 export type CloseReason = (typeof closeReasons)[number];

@@ -11,6 +11,7 @@ import { formatIsbn13 } from "@/lib/isbn";
 import { READING_LEVEL_FIELD_LABELS } from "@/lib/reading-levels";
 import { catalogSummary, getBookDetail } from "@/server/catalog";
 import { NotFoundError } from "@/server/errors";
+import { copyLendingStates } from "@/server/lending";
 import { requireTeacher } from "@/server/session";
 import { getRequestSettings } from "@/server/theme";
 import { cx } from "@/ui/cx";
@@ -18,11 +19,13 @@ import { LinkButton } from "@/ui/components/button";
 import { Avatar, PageHeader, Shape } from "@/ui/components/expressive";
 import { List, ListItem } from "@/ui/components/list";
 import { iconArrowBack } from "@/ui/icons/generated";
-import { AddCopyButton, BookActions, CopyMenu } from "./book-actions";
+import { Card } from "@/ui/components/surfaces";
+import { AddCopyButton, BookActions, CopyMenu, LendableSwitch } from "./book-actions";
 
 export const metadata: Metadata = { title: "Book" };
 
 const STATUS_LABELS: Record<Exclude<CopyStatus, "in_circulation">, string> = {
+  lent_out: "Lent out",
   lost: "Lost",
   damaged: "Damaged",
   withdrawn: "Withdrawn",
@@ -38,7 +41,11 @@ export default async function BookPage({ params }: PageProps<"/library/[bookId]"
     if (error instanceof NotFoundError) notFound();
     throw error;
   });
-  const [settings, summary] = await Promise.all([getRequestSettings(), catalogSummary(db, teacherId)]);
+  const [settings, summary, lendingStates] = await Promise.all([
+    getRequestSettings(),
+    catalogSummary(db, teacherId),
+    copyLendingStates(db, teacherId, bookId),
+  ]);
   const today = todayInTimeZone(settings.timeZone);
   const { book, copies, history } = detail;
 
@@ -130,12 +137,19 @@ export default async function BookPage({ params }: PageProps<"/library/[bookId]"
               {copies.map((copy) => {
                 const studentName = copy.studentFirstName ? `${copy.studentFirstName} ${copy.studentLastName}`.trim() : null;
                 const overdue = isOverdue(copy.dueOn, today);
-                const supporting =
+                const lending = lendingStates.get(copy.id);
+                const here =
                   copy.status !== "in_circulation"
                     ? STATUS_LABELS[copy.status]
                     : copy.loanId
                       ? `${studentName} · ${copy.dueOn ? describeDueDate(copy.dueOn, today) : `since ${formatInstant(copy.checkedOutAt as Date, settings.timeZone, today)}`}`
                       : "Available";
+                const supporting =
+                  lending?.kind === "lent_out"
+                    ? `Lent to ${lending.peerName}${lending.dueOn ? ` · ${describeDueDate(lending.dueOn, today)}` : ""}`
+                    : lending
+                      ? `From ${lending.peerName} · ${here}`
+                      : here;
                 return (
                   <ListItem
                     key={copy.id}
@@ -162,21 +176,28 @@ export default async function BookPage({ params }: PageProps<"/library/[bookId]"
                     actions={
                       copy.loanId && studentName ? (
                         <LoanActions loanId={copy.loanId} title={book.title} studentName={studentName} />
-                      ) : (
-                      <CopyMenu
-                        bookId={book.id}
-                        copyId={copy.id}
-                        copyNumber={copy.copyNumber}
-                        status={copy.status}
-                        isCheckedOut={Boolean(copy.loanId)}
-                        canDelete={copy.loanCount === 0 && copies.length > 1}
-                      />
+                      ) : lending ? null : (
+                        <CopyMenu
+                          bookId={book.id}
+                          copyId={copy.id}
+                          copyNumber={copy.copyNumber}
+                          status={copy.status}
+                          isCheckedOut={Boolean(copy.loanId)}
+                          canDelete={copy.loanCount === 0 && copies.length > 1}
+                        />
                       )
                     }
                   />
                 );
               })}
             </List>
+          </section>
+
+          <section className="flex flex-col gap-3">
+            <h2 className="text-title-lg-em">Lending</h2>
+            <Card variant="outlined" className="px-4 py-4">
+              <LendableSwitch bookId={book.id} lendable={book.lendable} />
+            </Card>
           </section>
 
           <section className="flex flex-col gap-3">

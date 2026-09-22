@@ -4,6 +4,7 @@ import { books, type CopyStatus, copies, loans, type MetadataSource, students } 
 import { normalizeIsbn } from "@/lib/isbn";
 import { ConflictError, isUniqueViolation, NotFoundError } from "./errors";
 import type { BookMetadata } from "./isbn-lookup";
+import { assertNotInShelfLoan } from "./lending";
 
 export type BookDetailsInput = {
   isbn13: string | null;
@@ -211,6 +212,7 @@ export async function updateBookDetails(db: Database, teacherId: string, bookId:
 export async function deleteBook(db: Database, teacherId: string, bookId: string): Promise<void> {
   await db.transaction(async (tx) => {
     await requireBook(tx, teacherId, bookId, true);
+    await assertNotInShelfLoan(tx, teacherId, { bookId });
     const [{ loanCount }] = await tx
       .select({ loanCount: count() })
       .from(loans)
@@ -220,6 +222,23 @@ export async function deleteBook(db: Database, teacherId: string, bookId: string
       throw new ConflictError("This book has checkout history, so it can't be deleted. Withdraw its copies instead.");
     }
     await tx.delete(books).where(and(eq(books.id, bookId), eq(books.teacherId, teacherId)));
+  });
+}
+
+/** Offers a title to connected teachers, or holds it back. */
+export async function setBookLendable(
+  db: Database,
+  teacherId: string,
+  bookId: string,
+  lendable: boolean,
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    await requireBook(tx, teacherId, bookId, true);
+    if (!lendable) await assertNotInShelfLoan(tx, teacherId, { bookId });
+    await tx
+      .update(books)
+      .set({ lendable })
+      .where(and(eq(books.id, bookId), eq(books.teacherId, teacherId)));
   });
 }
 
@@ -236,6 +255,7 @@ async function requireCopy(db: Database, teacherId: string, copyId: string) {
 export async function setCopyStatus(db: Database, teacherId: string, copyId: string, status: CopyStatus): Promise<void> {
   await db.transaction(async (tx) => {
     await requireCopy(tx, teacherId, copyId);
+    await assertNotInShelfLoan(tx, teacherId, { copyId });
     if (status !== "in_circulation") {
       const [open] = await tx.select({ id: loans.id }).from(loans).where(and(eq(loans.copyId, copyId), isNull(loans.closedAt))).limit(1);
       if (open) throw new ConflictError("This copy is checked out. Check it in or mark it lost from Check in first.");
@@ -247,6 +267,7 @@ export async function setCopyStatus(db: Database, teacherId: string, copyId: str
 export async function deleteCopy(db: Database, teacherId: string, copyId: string): Promise<void> {
   await db.transaction(async (tx) => {
     const copy = await requireCopy(tx, teacherId, copyId);
+    await assertNotInShelfLoan(tx, teacherId, { copyId });
     const [{ loanCount }] = await tx.select({ loanCount: count() }).from(loans).where(eq(loans.copyId, copyId));
     if (loanCount > 0) throw new ConflictError("This copy has checkout history. Withdraw it instead of deleting it.");
     const [{ copyCount }] = await tx.select({ copyCount: count() }).from(copies).where(eq(copies.bookId, copy.bookId));

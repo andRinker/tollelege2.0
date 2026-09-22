@@ -19,12 +19,16 @@ export async function createTestDb(): Promise<TestDatabase> {
 }
 
 /** Inserts a teacher account and returns its ID. */
-export async function createTeacher(db: Database, name = "Test Teacher"): Promise<string> {
+export async function createTeacher(
+  db: Database,
+  name = "Test Teacher",
+  email?: string,
+): Promise<string> {
   const id = randomUUID();
   await db.insert(schema.user).values({
     id,
     name,
-    email: `${id}@example.test`,
+    email: email ?? `${id}@example.test`,
     emailVerified: true,
   });
   return id;

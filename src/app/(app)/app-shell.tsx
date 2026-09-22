@@ -17,15 +17,24 @@ import {
   iconLogout,
   iconOutput,
   iconSettings,
+  iconSwapVert,
 } from "@/ui/icons/generated";
 
-const DESTINATIONS: NavDestination[] = [
-  { href: "/dashboard", label: "Home", icon: iconHome },
-  { href: "/library", label: "Library", icon: iconLocalLibrary },
-  { href: "/checkout", label: "Check out", icon: iconOutput },
-  { href: "/checkin", label: "Check in", icon: iconInput },
-  { href: "/classes", label: "Classes", icon: iconGroups },
-];
+function destinations(lendingWaiting: number): NavDestination[] {
+  return [
+    { href: "/dashboard", label: "Home", icon: iconHome },
+    { href: "/library", label: "Library", icon: iconLocalLibrary },
+    { href: "/checkout", label: "Check out", icon: iconOutput },
+    { href: "/checkin", label: "Check in", icon: iconInput },
+    { href: "/classes", label: "Classes", icon: iconGroups },
+    {
+      href: "/lending",
+      label: "Lending",
+      icon: iconSwapVert,
+      badge: { count: lendingWaiting, label: `${lendingWaiting} waiting for you` },
+    },
+  ];
+}
 
 const FOOTER_DESTINATIONS: NavDestination[] = [{ href: "/settings", label: "Settings", icon: iconSettings }];
 
@@ -66,8 +75,17 @@ function AccountMenu({ teacher }: { teacher: Teacher }) {
   );
 }
 
-export function AppShell({ teacher, railExpanded, children }: { teacher: Teacher; railExpanded: boolean; children: ReactNode }) {
+type AppShellProps = {
+  teacher: Teacher;
+  railExpanded: boolean;
+  /** Lending requests and invitations waiting on this teacher. */
+  lendingWaiting: number;
+  children: ReactNode;
+};
+
+export function AppShell({ teacher, railExpanded, lendingWaiting, children }: AppShellProps) {
   const [expanded, setExpanded] = useState(railExpanded);
+  const DESTINATIONS = destinations(lendingWaiting);
 
   function toggleRail() {
     const next = !expanded;

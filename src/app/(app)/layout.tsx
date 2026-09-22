@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import type { ReactNode } from "react";
 import { getDb } from "@/db/client";
+import { lendingAttentionCount } from "@/server/lending";
 import { requireTeacher } from "@/server/session";
 import { rememberTimeZone } from "@/server/settings";
 import { getRequestSettings } from "@/server/theme";
@@ -16,8 +17,14 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     await rememberTimeZone(getDb(), teacher.teacherId, decodeURIComponent(browserTimeZone));
   }
 
+  const lendingWaiting = await lendingAttentionCount(getDb(), teacher.teacherId);
+
   return (
-    <AppShell teacher={{ name: teacher.name, email: teacher.email }} railExpanded={cookieStore.get("rail")?.value === "expanded"}>
+    <AppShell
+      teacher={{ name: teacher.name, email: teacher.email }}
+      railExpanded={cookieStore.get("rail")?.value === "expanded"}
+      lendingWaiting={lendingWaiting}
+    >
       {children}
     </AppShell>
   );

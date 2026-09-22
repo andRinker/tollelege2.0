@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   check,
   foreignKey,
   index,
@@ -36,6 +37,8 @@ export const books = pgTable(
     /** Bin or shelf label. */
     location: text("location"),
     notes: text("notes"),
+    /** Offered to connected teachers. On by default; turn it off for class sets. */
+    lendable: boolean("lendable").notNull().default(true),
     metadataSource: text("metadata_source", { enum: metadataSources })
       .notNull()
       .default("manual"),

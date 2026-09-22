@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getDb } from "@/db/client";
-import { copyStatuses, metadataSources } from "@/db/schema/enums";
+import { manualCopyStatuses, metadataSources } from "@/db/schema/enums";
 import { type ActionResult, fail, ok } from "@/lib/action-result";
 import { normalizeIsbn } from "@/lib/isbn";
 import {
@@ -16,6 +16,7 @@ import {
   listBookIdentities,
   quickAddByIsbn,
   type QuickAddResult,
+  setBookLendable,
   setCopyStatus,
   undoQuickAdd,
   updateBookDetails,
@@ -189,6 +190,19 @@ export async function deleteBookAction(bookId: string): Promise<ActionResult> {
   }
 }
 
+export async function setBookLendableAction(bookId: string, lendable: boolean): Promise<ActionResult> {
+  const { teacherId } = await requireTeacher();
+  if (!id.safeParse(bookId).success) return fail("That book wasn't found.");
+  try {
+    await setBookLendable(getDb(), teacherId, bookId, Boolean(lendable));
+    revalidateLibrary(bookId);
+    revalidatePath("/lending", "layout");
+    return ok();
+  } catch (error) {
+    return handleError(error);
+  }
+}
+
 export async function addCopyAction(bookId: string): Promise<ActionResult<{ totalCopies: number }>> {
   const { teacherId } = await requireTeacher();
   if (!id.safeParse(bookId).success) return fail("That book wasn't found.");
@@ -203,7 +217,7 @@ export async function addCopyAction(bookId: string): Promise<ActionResult<{ tota
 
 export async function setCopyStatusAction(bookId: string, copyId: string, status: string): Promise<ActionResult> {
   const { teacherId } = await requireTeacher();
-  const parsedStatus = z.enum(copyStatuses).safeParse(status);
+  const parsedStatus = z.enum(manualCopyStatuses).safeParse(status);
   if (!id.safeParse(copyId).success || !parsedStatus.success) return fail("That copy wasn't found.");
   try {
     await setCopyStatus(getDb(), teacherId, copyId, parsedStatus.data);

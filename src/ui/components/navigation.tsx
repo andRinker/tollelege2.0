@@ -7,11 +7,14 @@ import { cx } from "@/ui/cx";
 import { iconMenu, iconMenuOpen, type IconData } from "@/ui/icons/generated";
 import { Icon } from "./icon";
 import { IconButton } from "./icon-button";
+import { Badge } from "./surfaces";
 
 export type NavDestination = {
   href: string;
   label: string;
   icon: IconData;
+  /** Shown on the icon when something is waiting there. Hidden at zero. */
+  badge?: { count: number; label: string };
 };
 
 function useIsActive() {
@@ -34,19 +37,40 @@ function VerticalItem({ destination, active, compact }: { destination: NavDestin
       aria-current={active ? "page" : undefined}
       className={cx(
         "group/nav flex cursor-pointer flex-col items-center gap-1 outline-none data-[focus-visible]:[&>span:first-child]:outline-3 data-[focus-visible]:[&>span:first-child]:outline-secondary",
-        compact ? "min-w-0 flex-1 py-1.5" : "w-full pb-1",
+        // `flex-auto`, not `flex-1`: each destination starts at the width its own label
+        // needs and only then shares what's left. An equal sixth of a 360px phone is 60px,
+        // which "Check out" misses by a hair — and by a different hair on every renderer.
+        compact ? "flex-auto px-0.5 py-1.5" : "w-full pb-1",
       )}
     >
       <span
         className={cx(
-          "relative isolate grid h-8 w-14 place-items-center rounded-full text-on-surface-variant group-aria-[current=page]/nav:text-on-secondary-container",
+          "relative isolate grid h-8 place-items-center rounded-full text-on-surface-variant group-aria-[current=page]/nav:text-on-secondary-container",
+          // Six destinations' worth of 56px pills overflow a 320px bar.
+          compact ? "w-12" : "w-14",
           PILL_STATES,
         )}
       >
         <span className={INDICATOR} />
         <Icon icon={destination.icon} filled={active} />
+        {Boolean(destination.badge?.count) && (
+          <Badge
+            count={destination.badge?.count}
+            label={destination.badge?.label}
+            className={cx("absolute top-0", compact ? "right-1.5" : "right-3")}
+          />
+        )}
       </span>
-      <span className="max-w-full truncate px-1 text-label-md text-on-surface-variant group-aria-[current=page]/nav:text-label-md-em group-aria-[current=page]/nav:text-secondary">
+      <span
+        className={cx(
+          "max-w-full truncate text-on-surface-variant group-aria-[current=page]/nav:text-secondary",
+          // Label Small on the bar: six destinations' worth of Label Medium doesn't fit a
+          // phone even once each one is sized to its own label.
+          compact
+            ? "text-center text-label-sm group-aria-[current=page]/nav:text-label-sm-em"
+            : "px-1 text-label-md group-aria-[current=page]/nav:text-label-md-em",
+        )}
+      >
         {destination.label}
       </span>
     </AriaLink>
@@ -69,6 +93,9 @@ function HorizontalItem({ destination, active }: { destination: NavDestination; 
         <span className={INDICATOR} />
         <Icon icon={destination.icon} filled={active} />
         <span className="text-label-lg group-aria-[current=page]/nav:text-label-lg-em">{destination.label}</span>
+        {Boolean(destination.badge?.count) && (
+          <Badge count={destination.badge?.count} label={destination.badge?.label} className="ml-auto" />
+        )}
       </span>
     </AriaLink>
   );
