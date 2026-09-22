@@ -25,6 +25,14 @@ Books get into the catalog four ways: a camera or USB barcode scan, a typed ISBN
 
 A misspelled variable name looks exactly like an unset one, so check the spelling before assuming a key is wrong.
 
+Every value is also set in the Vercel project, so a fresh checkout doesn't need them hunted down again:
+
+```
+npx vercel link && npx vercel env pull .env.local
+```
+
+**Then check two of them before running the app.** `DATABASE_URL` points at the production Neon database, and the app uses Postgres whenever it is set — leaving it in means `npm run dev`, `db:migrate` and `db:seed` all operate on live teacher data. Blank it, and the app falls back to local PGlite. `BETTER_AUTH_URL` must be `http://localhost:3000` locally, not the production domain, or sign-in redirects leave the machine.
+
 ## Shipping
 
 `main` is protected: both CI checks (`Types, lint, tests` and `End-to-end`) must pass before anything lands, and the rule applies to admins. Work goes through a pull request; a direct push to `main` is rejected. Merging deploys to production, and `vercel-build` runs `db:migrate` against Neon before building.
