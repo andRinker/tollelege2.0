@@ -11,7 +11,7 @@ export const metadata: Metadata = {
   description: `How ${APP_NAME} handles teacher and student information.`,
 };
 
-const LAST_UPDATED = "September 17, 2026";
+const LAST_UPDATED = "September 22, 2026";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -27,6 +27,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 export default function PrivacyPage() {
   const supportEmail = process.env.SUPPORT_EMAIL;
   const usesGoogleBooks = Boolean(process.env.GOOGLE_BOOKS_API_KEY);
+  const usesShelfPhotos = Boolean(process.env.GEMINI_API_KEY);
 
   return (
     <div className="min-h-dvh bg-surface">
@@ -97,11 +98,36 @@ export default function PrivacyPage() {
             </li>
             {usesGoogleBooks && (
               <li>
-                <strong>Google Books</strong> fills in details Open Library doesn&rsquo;t have. It also receives only the ISBN.
+                <strong>Google Books</strong> is asked alongside Open Library, so each book uses the better details of the two. It
+                also receives only the ISBN.
+              </li>
+            )}
+            {usesShelfPhotos && (
+              <li>
+                <strong>Google Gemini</strong> reads shelf photos, if you use &ldquo;Photograph a shelf.&rdquo; See below.
               </li>
             )}
           </ul>
         </Section>
+
+        {usesShelfPhotos && (
+          <Section title="Shelf photos">
+            <p>
+              &ldquo;Photograph a shelf&rdquo; sends the photo you take to Google&rsquo;s Gemini service, which reads the book
+              titles off the spines and sends them back. Nothing is added to your library until you confirm it.
+            </p>
+            <p>
+              The photo is used for that one reading and then discarded. {APP_NAME} never saves it &mdash; not in the database,
+              not on disk &mdash; and never sends anything else with it. What Google does with it is covered by their own
+              privacy terms.
+            </p>
+            <p>
+              Point the camera at books, not at people. A photo of a shelf carries no student information; a photo of a classroom
+              might. If you would rather not send photos anywhere, don&rsquo;t use this feature &mdash; scanning barcodes and
+              typing ISBNs work exactly as before.
+            </p>
+          </Section>
+        )}
 
         <Section title="Cookies">
           <p>

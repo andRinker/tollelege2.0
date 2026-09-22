@@ -1,17 +1,22 @@
 import "server-only";
 import { type MatchCandidate, type SpineMatch, matchSpine } from "./match";
+import { findOwned, type OwnedBook, type OwnedCandidate } from "./owned";
 import { readSpines } from "./vision";
 
 export type { MatchCandidate, MatchConfidence, SpineMatch } from "./match";
+export type { OwnedBook, OwnedCandidate } from "./owned";
 export type { SpineReading } from "./vision";
 export { shelfScanConfigured, ShelfScanUnavailableError } from "./vision";
 
 /** Catalogue searches run in parallel, but not sixty at once. */
 const CONCURRENCY = 6;
 
+/** A matched spine, plus the book the teacher already owns for it. */
+export type ShelfProposal = SpineMatch & { owned: OwnedBook | null };
+
 export type ShelfScan = {
   /** One entry per spine the reader could make out, in shelf order. */
-  matches: SpineMatch[];
+  proposals: ShelfProposal[];
   /** Spines that were read but matched nothing — these need a barcode scan instead. */
   unmatched: number;
 };
@@ -33,15 +38,19 @@ async function inBatches<In, Out>(items: In[], size: number, run: (item: In) => 
  */
 export async function scanShelf(
   image: { data: ArrayBuffer; mimeType: string },
-  fetchFn: typeof fetch = fetch,
+  options: { owned?: readonly OwnedCandidate[]; fetchFn?: typeof fetch } = {},
 ): Promise<ShelfScan> {
+  const fetchFn = options.fetchFn ?? fetch;
+  const owned = options.owned ?? [];
+
   const readings = await readSpines(image, fetchFn);
-  if (readings.length === 0) return { matches: [], unmatched: 0 };
+  if (readings.length === 0) return { proposals: [], unmatched: 0 };
 
   const matches = await inBatches(readings, CONCURRENCY, (reading) => matchSpine(reading, fetchFn));
+  const proposals = matches.map((match) => ({ ...match, owned: findOwned(match, owned) }));
   return {
-    matches,
-    unmatched: matches.filter((match) => match.candidates.length === 0).length,
+    proposals,
+    unmatched: proposals.filter((proposal) => proposal.candidates.length === 0).length,
   };
 }
 

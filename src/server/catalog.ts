@@ -101,16 +101,21 @@ export async function addCopies(
 }
 
 export async function findBookByIsbn(db: Database, teacherId: string, isbn13: string) {
+  // Counted with a join rather than a correlated subquery: drizzle renders column
+  // references inside a `sql` template unqualified, so `copies.book_id = books.id`
+  // came out as `book_id = id` and silently compared a copy against itself.
   const [book] = await db
     .select({
       id: books.id,
       title: books.title,
       authors: books.authors,
       coverUrl: books.coverUrl,
-      totalCopies: sql<number>`(select count(*) from ${copies} where ${copies.bookId} = ${books.id} and ${copies.status} = 'in_circulation')`.mapWith(Number),
+      totalCopies: count(copies.id),
     })
     .from(books)
+    .leftJoin(copies, and(eq(copies.bookId, books.id), eq(copies.status, "in_circulation")))
     .where(and(eq(books.teacherId, teacherId), eq(books.isbn13, isbn13)))
+    .groupBy(books.id)
     .limit(1);
   return book ?? null;
 }
@@ -439,3 +444,31 @@ export async function getBookDetail(db: Database, teacherId: string, bookId: str
 }
 
 export type BookDetail = Awaited<ReturnType<typeof getBookDetail>>;
+
+export type BookIdentity = {
+  id: string;
+  title: string;
+  authors: string[];
+  isbn13: string | null;
+  copies: number;
+};
+
+/**
+ * Just enough of the catalogue to recognise a book the teacher already has. Shelf scans
+ * match against this so a second printing of an owned title adds a copy instead of a
+ * duplicate row. Deliberately lean: a classroom library is hundreds of books, not millions.
+ */
+export async function listBookIdentities(db: Database, teacherId: string): Promise<BookIdentity[]> {
+  return db
+    .select({
+      id: books.id,
+      title: books.title,
+      authors: books.authors,
+      isbn13: books.isbn13,
+      copies: count(copies.id),
+    })
+    .from(books)
+    .leftJoin(copies, and(eq(copies.bookId, books.id), eq(copies.status, "in_circulation")))
+    .where(eq(books.teacherId, teacherId))
+    .groupBy(books.id);
+}

@@ -83,6 +83,16 @@ function gradeMatch(reading: SpineReading, title: string, authors: string[]): Ma
   return authorAgreement === "agrees" ? "close" : "weak";
 }
 
+/**
+ * Whether a spine reading and an existing record are plausibly the same work. Looser than
+ * an `exact` grade on purpose: this decides whether to offer a copy of a book the teacher
+ * already owns, where a different printing of the same title is exactly what we want to catch.
+ */
+export function looksLikeSameBook(reading: SpineReading, title: string, authors: string[]): boolean {
+  if (compareTitles(reading.title, title) === "none") return false;
+  return compareAuthors(reading.author, authors) !== "disagrees";
+}
+
 async function getJson(url: string, fetchFn: typeof fetch): Promise<unknown | null> {
   try {
     const response = await fetchFn(url, {
