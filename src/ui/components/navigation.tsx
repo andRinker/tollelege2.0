@@ -42,17 +42,32 @@ function VerticalItem({ destination, active, compact }: { destination: NavDestin
     >
       <span
         className={cx(
-          "relative isolate grid h-8 w-14 place-items-center rounded-full text-on-surface-variant group-aria-[current=page]/nav:text-on-secondary-container",
+          "relative isolate grid h-8 place-items-center rounded-full text-on-surface-variant group-aria-[current=page]/nav:text-on-secondary-container",
+          // Six destinations' worth of 56px pills overflow a 320px bar.
+          compact ? "w-12" : "w-14",
           PILL_STATES,
         )}
       >
         <span className={INDICATOR} />
         <Icon icon={destination.icon} filled={active} />
         {Boolean(destination.badge?.count) && (
-          <Badge count={destination.badge?.count} label={destination.badge?.label} className="absolute top-0 right-3" />
+          <Badge
+            count={destination.badge?.count}
+            label={destination.badge?.label}
+            className={cx("absolute top-0", compact ? "right-1.5" : "right-3")}
+          />
         )}
       </span>
-      <span className="max-w-full truncate px-1 text-label-md text-on-surface-variant group-aria-[current=page]/nav:text-label-md-em group-aria-[current=page]/nav:text-secondary">
+      <span
+        className={cx(
+          "max-w-full truncate text-on-surface-variant group-aria-[current=page]/nav:text-secondary",
+          // On the bar every destination gets a sixth of the screen, so the label takes the
+          // full width and the smaller size: "Check out" in Label Medium doesn't fit a phone.
+          compact
+            ? "w-full text-center text-label-sm group-aria-[current=page]/nav:text-label-sm-em"
+            : "px-1 text-label-md group-aria-[current=page]/nav:text-label-md-em",
+        )}
+      >
         {destination.label}
       </span>
     </AriaLink>

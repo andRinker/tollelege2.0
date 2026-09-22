@@ -79,4 +79,24 @@ test("a teacher signs up, builds a catalog and roster, and checks a book out and
     await expect(page.getByRole("heading", { name: "Ada Lovelace" })).toBeVisible();
     await expect(page.getByRole("list", { name: /history/i }).getByText(/Frog and Toad Are Friends/)).toBeVisible();
   });
+
+  // Every destination added to the bar takes width from the labels already there, and the
+  // longest one is bold while you're on it. 360px is the narrowest phone still in use.
+  await test.step("every navigation label fits a narrow phone", async () => {
+    const viewport = page.viewportSize();
+    await page.setViewportSize({ width: 360, height: 844 });
+    await page.goto("/checkout");
+
+    const bar = page.locator("nav[data-nav-bar]");
+    await expect(bar).toBeVisible();
+    const clipped = await bar.locator("a").evaluateAll((links) =>
+      links
+        .map((link) => link.querySelector("span:last-child") as HTMLElement)
+        .filter((label) => label.scrollWidth > label.clientWidth + 1)
+        .map((label) => label.textContent),
+    );
+    expect(clipped, "navigation labels cut off at 360px").toEqual([]);
+
+    if (viewport) await page.setViewportSize(viewport);
+  });
 });
