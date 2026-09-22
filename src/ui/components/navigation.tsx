@@ -37,7 +37,10 @@ function VerticalItem({ destination, active, compact }: { destination: NavDestin
       aria-current={active ? "page" : undefined}
       className={cx(
         "group/nav flex cursor-pointer flex-col items-center gap-1 outline-none data-[focus-visible]:[&>span:first-child]:outline-3 data-[focus-visible]:[&>span:first-child]:outline-secondary",
-        compact ? "min-w-0 flex-1 py-1.5" : "w-full pb-1",
+        // `flex-auto`, not `flex-1`: each destination starts at the width its own label
+        // needs and only then shares what's left. An equal sixth of a 360px phone is 60px,
+        // which "Check out" misses by a hair — and by a different hair on every renderer.
+        compact ? "flex-auto px-0.5 py-1.5" : "w-full pb-1",
       )}
     >
       <span
@@ -61,10 +64,10 @@ function VerticalItem({ destination, active, compact }: { destination: NavDestin
       <span
         className={cx(
           "max-w-full truncate text-on-surface-variant group-aria-[current=page]/nav:text-secondary",
-          // On the bar every destination gets a sixth of the screen, so the label takes the
-          // full width and the smaller size: "Check out" in Label Medium doesn't fit a phone.
+          // Label Small on the bar: six destinations' worth of Label Medium doesn't fit a
+          // phone even once each one is sized to its own label.
           compact
-            ? "w-full text-center text-label-sm group-aria-[current=page]/nav:text-label-sm-em"
+            ? "text-center text-label-sm group-aria-[current=page]/nav:text-label-sm-em"
             : "px-1 text-label-md group-aria-[current=page]/nav:text-label-md-em",
         )}
       >

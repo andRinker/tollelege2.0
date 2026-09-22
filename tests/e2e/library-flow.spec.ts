@@ -96,6 +96,9 @@ test("a teacher signs up, builds a catalog and roster, and checks a book out and
         .map((label) => label.textContent),
     );
     expect(clipped, "navigation labels cut off at 360px").toEqual([]);
+    // Fitting the labels must not be paid for by pushing the bar off the screen.
+    const overflows = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+    expect(overflows, "the page scrolls sideways at 360px").toBe(false);
 
     if (viewport) await page.setViewportSize(viewport);
   });
