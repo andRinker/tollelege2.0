@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { getDb } from "@/db/client";
 import { catalogSummary } from "@/server/catalog";
+import { describeExpiry, latestScanEventSeq, listActivePairings } from "@/server/scan-pairing";
 import { requireTeacher } from "@/server/session";
 import { getRequestSettings } from "@/server/theme";
 import { LinkButton } from "@/ui/components/button";
@@ -18,7 +19,13 @@ export const maxDuration = 60;
 
 export default async function AddBooksPage() {
   const { teacherId } = await requireTeacher();
-  const [settings, summary] = await Promise.all([getRequestSettings(), catalogSummary(getDb(), teacherId)]);
+  const db = getDb();
+  const [settings, summary, pairedPhones, scanCursor] = await Promise.all([
+    getRequestSettings(),
+    catalogSummary(db, teacherId),
+    listActivePairings(db, teacherId),
+    latestScanEventSeq(db, teacherId),
+  ]);
 
   return (
     <>
@@ -34,6 +41,12 @@ export default async function AddBooksPage() {
       <AddBooks
         readingLevelSystem={settings.readingLevelSystem}
         suggestions={{ tags: summary.tags, locations: summary.locations }}
+        pairedPhones={pairedPhones.map((phone) => ({
+          pairingId: phone.pairingId,
+          deviceLabel: phone.deviceLabel,
+          expiresLabel: describeExpiry(phone.expiresAt, settings.timeZone),
+        }))}
+        scanCursor={scanCursor}
       />
     </>
   );

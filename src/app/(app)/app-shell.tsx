@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { type ReactNode, useState } from "react";
 import { Button as AriaButton, Header, MenuSection } from "react-aria-components";
 import { authClient } from "@/lib/auth-client";
+import { revokeAllPairingsAction } from "@/app/(app)/library/add/pairing-actions";
 import { cx } from "@/ui/cx";
 import { BrandMark } from "@/ui/components/brand";
 import { Avatar } from "@/ui/components/expressive";
@@ -53,6 +54,7 @@ function AccountMenu({ teacher }: { teacher: Teacher }) {
       <Menu
         onAction={async (key) => {
           if (key !== "sign-out") return;
+          await revokeAllPairingsAction();
           await authClient.signOut();
           router.replace("/sign-in");
           router.refresh();

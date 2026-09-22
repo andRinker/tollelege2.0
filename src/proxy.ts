@@ -3,7 +3,9 @@ import { NextResponse, type NextRequest } from "next/server";
 
 // Pages anyone can open. This is only an optimistic redirect based on cookie presence;
 // pages, layouts, and server actions verify the session with requireTeacher().
-const PUBLIC_PREFIXES = ["/sign-in", "/sign-up", "/forgot-password", "/reset-password", "/privacy", "/design"];
+// `/scan` is the paired-phone scanner. It has no session by design — it carries a pairing
+// token instead — so sending it to sign-in would defeat the entire point of it.
+const PUBLIC_PREFIXES = ["/sign-in", "/sign-up", "/forgot-password", "/reset-password", "/privacy", "/design", "/scan"];
 
 export function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;

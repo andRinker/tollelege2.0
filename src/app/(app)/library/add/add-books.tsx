@@ -2,7 +2,7 @@
 
 import { AnimatePresence, motion } from "motion/react";
 import { useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Form } from "react-aria-components";
 import { BarcodeScannerDialog } from "@/components/barcode-scanner";
 import { BookCover } from "@/components/book-cover";
@@ -19,6 +19,7 @@ import {
 import type { ReadingLevelSystem } from "@/db/schema/enums";
 import { formatIsbn13, normalizeIsbn } from "@/lib/isbn";
 import type { QuickAddResult } from "@/server/catalog";
+import type { ShelfProposal } from "@/server/shelf-scan";
 import { cx } from "@/ui/cx";
 import { Button, LinkButton } from "@/ui/components/button";
 import { Dialog } from "@/ui/components/dialog";
@@ -48,7 +49,9 @@ import {
   quickAddAction,
   undoQuickAddAction,
 } from "../actions";
+import { type PairedPhone, PhonePairing } from "./phone-pairing";
 import { ShelfScanDialog } from "./shelf-scan";
+import { type ScanFeedEvent, useScanFeed } from "./use-scan-feed";
 
 type Suggestions = { tags: string[]; locations: string[] };
 
@@ -70,7 +73,15 @@ function Section({ children, className }: { children: React.ReactNode; className
   );
 }
 
-export function AddBooks({ readingLevelSystem, suggestions }: { readingLevelSystem: ReadingLevelSystem; suggestions: Suggestions }) {
+type AddBooksProps = {
+  readingLevelSystem: ReadingLevelSystem;
+  suggestions: Suggestions;
+  pairedPhones: PairedPhone[];
+  /** Where the scan feed stood when the page rendered. */
+  scanCursor: number;
+};
+
+export function AddBooks({ readingLevelSystem, suggestions, pairedPhones, scanCursor }: AddBooksProps) {
   const router = useRouter();
   const showSnackbar = useSnackbar();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -82,6 +93,46 @@ export function AddBooks({ readingLevelSystem, suggestions }: { readingLevelSyst
   const [scannerOpen, setScannerOpen] = useState(false);
   const [manual, setManual] = useState<BookFormValue | null>(null);
   const [shelfOpen, setShelfOpen] = useState(false);
+  const [phoneScanning, setPhoneScanning] = useState(false);
+  const [incomingShelf, setIncomingShelf] = useState<{ proposals: ShelfProposal[]; at: number } | null>(null);
+
+  /**
+   * A paired phone has already done the adding by the time we hear about it, so these
+   * arrive as finished entries rather than going through `quickAdd`. They join the same
+   * session list as a USB scan, with the same undo.
+   */
+  const onScanEvents = useCallback((events: ScanFeedEvent[]) => {
+    setPhoneScanning(true);
+    const scanned: ScanEntry[] = [];
+    for (const event of events) {
+      if (event.kind === "book_added") {
+        scanned.push({
+          key: `phone-${event.seq}`,
+          isbn13: event.payload.isbn13,
+          state: "added",
+          result: event.payload.result,
+        });
+      } else if (event.kind === "lookup_failed") {
+        scanned.push({
+          key: `phone-${event.seq}`,
+          isbn13: "isbn13" in event.payload ? event.payload.isbn13 : "",
+          state: event.payload.status === "invalid" ? "error" : event.payload.status,
+          message: event.payload.status === "invalid" ? "That isn't a valid ISBN." : undefined,
+        });
+      } else {
+        // A shelf from the phone still gets confirmed here, exactly like one taken here.
+        setIncomingShelf({ proposals: event.payload.proposals, at: event.seq });
+        setShelfOpen(true);
+      }
+    }
+    if (scanned.length === 0) return;
+    // A phone scanning into a list nobody is looking at is the easiest way to lose a book.
+    setRapid(true);
+    setEntries((current) => [...scanned.reverse(), ...current]);
+    router.refresh();
+  }, [router]);
+
+  useScanFeed(true, scanCursor, onScanEvents);
 
   function refocus() {
     setIsbnInput("");
@@ -200,6 +251,10 @@ export function AddBooks({ readingLevelSystem, suggestions }: { readingLevelSyst
         </Button>
       </Section>
 
+      <Section className="expanded:col-start-1">
+        <PhonePairing paired={pairedPhones} connected={phoneScanning} />
+      </Section>
+
       <div className="flex min-w-0 flex-col gap-4">
         {rapid ? (
           <RapidScanList entries={entries} addedCount={addedCount} onUndo={undo} onEnterDetails={(isbn13) => setManual({ ...EMPTY_BOOK, isbn: isbn13 })} onRetry={(isbn13) => quickAdd(isbn13)} />
@@ -219,7 +274,13 @@ export function AddBooks({ readingLevelSystem, suggestions }: { readingLevelSyst
         )}
       </div>
 
-      <ShelfScanDialog isOpen={shelfOpen} onOpenChange={setShelfOpen} />
+      {/* Remounted per arriving shelf, so a second photo replaces the first outright. */}
+      <ShelfScanDialog
+        key={incomingShelf?.at ?? "own-photo"}
+        isOpen={shelfOpen}
+        onOpenChange={setShelfOpen}
+        incoming={incomingShelf?.proposals ?? null}
+      />
 
       <BarcodeScannerDialog
         isOpen={scannerOpen}

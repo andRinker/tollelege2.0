@@ -14,8 +14,6 @@ import {
   deleteCopy,
   findBookByIsbn,
   listBookIdentities,
-  quickAddByIsbn,
-  type QuickAddResult,
   setBookLendable,
   setCopyStatus,
   undoQuickAdd,
@@ -23,8 +21,10 @@ import {
 } from "@/server/catalog";
 import { isUserFacingError } from "@/server/errors";
 import { type BookMetadata, lookupIsbn } from "@/server/isbn-lookup";
+import { addBookByScan, type QuickAddOutcome } from "@/server/quick-add";
 import { requireTeacher } from "@/server/session";
 import {
+  checkPhoto,
   scanShelf,
   shelfScanConfigured,
   type ShelfProposal,
@@ -120,34 +120,16 @@ export async function addBookAction(input: BookDetailsInput, copyCount: number):
   }
 }
 
-export type QuickAddActionResult =
-  | { status: "added"; isbn13: string; result: QuickAddResult }
-  | { status: "invalid" }
-  | { status: "not_found"; isbn13: string }
-  | { status: "unavailable"; isbn13: string }
-  | { status: "error"; isbn13: string; message: string };
+export type QuickAddActionResult = QuickAddOutcome | { status: "error"; isbn13: string; message: string };
 
 export async function quickAddAction(raw: string): Promise<QuickAddActionResult> {
   const { teacherId } = await requireTeacher();
-  const isbn13 = normalizeIsbn(String(raw));
-  if (!isbn13) return { status: "invalid" };
-
-  const db = getDb();
   try {
-    const owned = await findBookByIsbn(db, teacherId, isbn13);
-    let result: QuickAddResult;
-    if (owned) {
-      const { copyIds, totalCopies } = await addCopies(db, teacherId, owned.id);
-      result = { outcome: "copy_added", bookId: owned.id, copyId: copyIds[0], title: owned.title, authors: owned.authors, coverUrl: owned.coverUrl, totalCopies };
-    } else {
-      const lookup = await lookupIsbn(db, isbn13);
-      if (lookup.status !== "found") return { status: lookup.status, isbn13 };
-      result = await quickAddByIsbn(db, teacherId, isbn13, lookup.metadata);
-    }
-    revalidateLibrary();
-    return { status: "added", isbn13, result };
+    const outcome = await addBookByScan(getDb(), teacherId, raw);
+    if (outcome.status === "added") revalidateLibrary();
+    return outcome;
   } catch (error) {
-    return { status: "error", isbn13, message: handleError(error).message };
+    return { status: "error", isbn13: normalizeIsbn(String(raw)) ?? "", message: handleError(error).message };
   }
 }
 
@@ -240,9 +222,6 @@ export async function deleteCopyAction(bookId: string, copyId: string): Promise<
   }
 }
 
-const MAX_PHOTO_BYTES = 6 * 1024 * 1024;
-const PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
-
 export type ShelfScanActionResult =
   | { status: "scanned"; proposals: ShelfProposal[]; unmatched: number }
   | { status: "unconfigured" }
@@ -258,20 +237,14 @@ export async function scanShelfAction(formData: FormData): Promise<ShelfScanActi
   const { teacherId } = await requireTeacher();
   if (!shelfScanConfigured()) return { status: "unconfigured" };
 
-  const photo = formData.get("photo");
-  if (!(photo instanceof File)) return { status: "invalid", message: "Choose a photo of a shelf." };
-  if (photo.size === 0) return { status: "invalid", message: "That photo was empty." };
-  if (photo.size > MAX_PHOTO_BYTES) {
-    return { status: "invalid", message: "That photo is too large. Try again with a single shelf." };
-  }
-  const mimeType = PHOTO_TYPES.find((type) => type === photo.type);
-  if (!mimeType) return { status: "invalid", message: "Photos need to be JPEG, PNG or WebP." };
+  const photo = checkPhoto(formData.get("photo"));
+  if ("error" in photo) return { status: "invalid", message: photo.error };
 
   try {
     // The teacher's own catalogue goes in, so a second printing of a book they already
     // have offers another copy instead of quietly creating a duplicate title.
     const owned = await listBookIdentities(getDb(), teacherId);
-    const scan = await scanShelf({ data: await photo.arrayBuffer(), mimeType }, { owned });
+    const scan = await scanShelf({ data: await photo.data.arrayBuffer(), mimeType: photo.mimeType }, { owned });
     return { status: "scanned", proposals: scan.proposals, unmatched: scan.unmatched };
   } catch (error) {
     if (error instanceof ShelfScanUnavailableError) {

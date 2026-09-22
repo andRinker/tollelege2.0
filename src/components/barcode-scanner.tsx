@@ -53,6 +53,14 @@ export function BarcodeScannerDialog({ isOpen, onOpenChange, onDetected, status,
   );
 }
 
+/**
+ * The viewfinder on its own, for surfaces that aren't a dialog — the paired phone runs
+ * it full-bleed, since on a phone the scanner *is* the page.
+ */
+export function BarcodeCamera({ onDetected, status }: { onDetected: (isbn13: string) => void; status?: ReactNode }) {
+  return <Scanner onDetected={onDetected} status={status} />;
+}
+
 function Scanner({ onDetected, status }: { onDetected: (isbn13: string) => void; status?: ReactNode }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const trackRef = useRef<MediaStreamTrack | null>(null);

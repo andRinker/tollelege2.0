@@ -71,6 +71,12 @@ export default function PrivacyPage() {
             We also store what you put into {APP_NAME}: your classes and rosters, your book catalog, checkout records, and
             settings such as loan periods, your time zone, and your color theme.
           </p>
+          <p>
+            If you pair a phone as a scanner, we store a one-way hash of that pairing code and a coarse description of the
+            device, such as &ldquo;iPhone&rdquo;. A paired phone can add books to your library and send a shelf photo, and
+            nothing else &mdash; it can&rsquo;t read your library, your classes, or your students. It stops working at
+            midnight, and you can disconnect it at any time.
+          </p>
         </Section>
 
         <Section title="Who can see your data">

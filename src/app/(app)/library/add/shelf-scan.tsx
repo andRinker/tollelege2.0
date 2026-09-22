@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { BookCover } from "@/components/book-cover";
+import { preparePhoto } from "@/components/prepare-photo";
 import type { MatchCandidate, ShelfProposal } from "@/server/shelf-scan";
 import { cx } from "@/ui/cx";
 import { Button } from "@/ui/components/button";
@@ -20,9 +21,6 @@ import {
 } from "@/ui/icons/generated";
 import { addCopyAction, quickAddAction, scanShelfAction } from "../actions";
 
-/** Big enough for the reader to make out a spine, small enough to upload over a classroom's wifi. */
-const MAX_EDGE = 1600;
-
 type Row = {
   proposal: ShelfProposal;
   /** Which of the candidate editions the teacher has picked. */
@@ -37,36 +35,46 @@ type State =
   | { kind: "adding"; done: number; total: number }
   | { kind: "error"; message: string };
 
-/** Shrinks a phone photo before upload. Falls back to the original if the browser can't decode it. */
-async function preparePhoto(file: File): Promise<File> {
-  try {
-    const bitmap = await createImageBitmap(file);
-    const scale = Math.min(1, MAX_EDGE / Math.max(bitmap.width, bitmap.height));
-    const width = Math.round(bitmap.width * scale);
-    const height = Math.round(bitmap.height * scale);
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    const context = canvas.getContext("2d");
-    if (!context) throw new Error("no canvas context");
-    context.drawImage(bitmap, 0, 0, width, height);
-    bitmap.close();
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.85));
-    if (!blob) throw new Error("could not encode");
-    return new File([blob], "shelf.jpg", { type: "image/jpeg" });
-  } catch {
-    return file;
-  }
-}
-
 const CONFIDENCE_LABEL: Record<MatchCandidate["confidence"], { text: string; className: string }> = {
   exact: { text: "Match", className: "text-primary" },
   close: { text: "Check this one", className: "text-tertiary" },
   weak: { text: "Probably wrong", className: "text-error" },
 };
 
-export function ShelfScanDialog({ isOpen, onOpenChange }: { isOpen: boolean; onOpenChange: (open: boolean) => void }) {
-  const [state, setState] = useState<State>({ kind: "idle" });
+/**
+ * Turns what the reader saw into what the teacher is asked about. Shared by a photo
+ * picked here and one sent from a paired phone, so a shelf is reviewed the same way
+ * whichever camera took it.
+ */
+function reviewFrom(proposals: ShelfProposal[]): State {
+  const rows: Row[] = proposals
+    .filter((proposal) => proposal.candidates.length > 0)
+    .map((proposal) => ({
+      proposal,
+      chosen: 0,
+      // Two kinds of row start unticked: a doubtful match, so nothing wrong is added by
+      // simply not looking, and a book already on the shelves, since re-photographing a
+      // catalogued shelf should not silently multiply its copies.
+      selected: proposal.candidates[0].confidence !== "weak" && !proposal.owned,
+    }));
+  const unreadable = proposals
+    .filter((proposal) => proposal.candidates.length === 0)
+    .map((proposal) => proposal.reading.title);
+  return { kind: "review", rows, unreadable };
+}
+
+type ShelfScanDialogProps = {
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+  /**
+   * Proposals that arrived from a paired phone, to review instead of taking a photo here.
+   * The caller remounts on each new shelf, so this is only ever read once.
+   */
+  incoming?: ShelfProposal[] | null;
+};
+
+export function ShelfScanDialog({ isOpen, onOpenChange, incoming }: ShelfScanDialogProps) {
+  const [state, setState] = useState<State>(() => (incoming ? reviewFrom(incoming) : { kind: "idle" }));
   const showSnackbar = useSnackbar();
 
   function reset() {
@@ -87,21 +95,7 @@ export function ShelfScanDialog({ isOpen, onOpenChange }: { isOpen: boolean; onO
       setState({ kind: "error", message: result.message });
       return;
     }
-
-    const rows: Row[] = result.proposals
-      .filter((proposal) => proposal.candidates.length > 0)
-      .map((proposal) => ({
-        proposal,
-        chosen: 0,
-        // Two kinds of row start unticked: a doubtful match, so nothing wrong is added by
-        // simply not looking, and a book already on the shelves, since re-photographing a
-        // catalogued shelf should not silently multiply its copies.
-        selected: proposal.candidates[0].confidence !== "weak" && !proposal.owned,
-      }));
-    const unreadable = result.proposals
-      .filter((proposal) => proposal.candidates.length === 0)
-      .map((proposal) => proposal.reading.title);
-    setState({ kind: "review", rows, unreadable });
+    setState(reviewFrom(result.proposals));
   }
 
   async function addSelected(rows: Row[], close: () => void) {
