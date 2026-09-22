@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import type { Database } from "@/db/client";
 import { isbnLookupCache } from "@/db/schema";
+import { mergeMetadata } from "./merge";
 import { type BookMetadata, type Fetch, fetchGoogleBooks, fetchOpenLibrary, LookupUnavailableError } from "./sources";
 
 export type { BookMetadata } from "./sources";
@@ -16,8 +17,11 @@ const NOT_FOUND_TTL_MS = 24 * 60 * 60 * 1000;
 type LookupOptions = { fetchFn?: Fetch; now?: Date };
 
 /**
- * Finds public metadata for an ISBN-13: the shared cache first, then Open Library, then
- * Google Books when GOOGLE_BOOKS_API_KEY is set. Network failures aren't cached.
+ * Finds public metadata for an ISBN-13: the shared cache first, then every configured
+ * source at once, merged. Asking both and combining them beats stopping at the first
+ * answer, because each source is stronger in different fields — see `mergeMetadata`.
+ * Network failures aren't cached, and one source being down never hides a book the
+ * other one knows.
  */
 export async function lookupIsbn(db: Database, isbn13: string, options: LookupOptions = {}): Promise<LookupResult> {
   const now = options.now ?? new Date();
@@ -29,18 +33,29 @@ export async function lookupIsbn(db: Database, isbn13: string, options: LookupOp
   }
 
   const fetchFn = options.fetchFn ?? (await fixtureFetch()) ?? fetch;
-  let metadata: BookMetadata | null;
-  try {
-    metadata = await fetchOpenLibrary(isbn13, fetchFn);
-    const googleKey = process.env.GOOGLE_BOOKS_API_KEY;
-    if (!metadata && googleKey) metadata = await fetchGoogleBooks(isbn13, googleKey, fetchFn);
-  } catch (error) {
-    if (error instanceof LookupUnavailableError) {
-      console.warn(`ISBN lookup unavailable for ${isbn13}: ${error.message}`);
-      return { status: "unavailable" };
+  const googleKey = process.env.GOOGLE_BOOKS_API_KEY;
+
+  // Ordered: Open Library first, then Google Books when configured.
+  const attempts: Promise<BookMetadata | null>[] = [fetchOpenLibrary(isbn13, fetchFn)];
+  if (googleKey) attempts.push(fetchGoogleBooks(isbn13, googleKey, fetchFn));
+  const settled = await Promise.allSettled(attempts);
+
+  const answers: (BookMetadata | null)[] = [];
+  let answered = 0;
+  for (const [index, result] of settled.entries()) {
+    if (result.status === "fulfilled") {
+      answers[index] = result.value;
+      answered += 1;
+      continue;
     }
-    throw error;
+    if (!(result.reason instanceof LookupUnavailableError)) throw result.reason;
+    const label = index === 0 ? "Open Library" : "Google Books";
+    console.warn(`ISBN lookup: ${label} unavailable for ${isbn13}: ${result.reason.message}`);
   }
+  // Every configured source failed, so "not found" would be a lie worth caching for a day.
+  if (answered === 0) return { status: "unavailable" };
+
+  const metadata = mergeMetadata(answers[0] ?? null, answers[1] ?? null);
 
   await db
     .insert(isbnLookupCache)
