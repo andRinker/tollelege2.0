@@ -24,7 +24,9 @@ type BarcodeScannerDialogProps = {
   title?: string;
 };
 
-const REPEAT_WINDOW_MS = 3000;
+// The same book counts again only once its barcode has been out of frame this long.
+// A plain timer re-added whatever the camera happened to still be pointing at.
+const CLEAR_FRAME_MS = 1200;
 
 function beep() {
   try {
@@ -54,7 +56,7 @@ export function BarcodeScannerDialog({ isOpen, onOpenChange, onDetected, status,
 function Scanner({ onDetected, status }: { onDetected: (isbn13: string) => void; status?: ReactNode }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const trackRef = useRef<MediaStreamTrack | null>(null);
-  const lastRead = useRef<{ isbn: string; at: number } | null>(null);
+  const lastRead = useRef<{ isbn: string; seenAt: number } | null>(null);
   const onDetectedRef = useRef(onDetected);
   const [state, setState] = useState<ScannerState>({ kind: "starting" });
   const [torchSupported, setTorchSupported] = useState(false);
@@ -125,8 +127,14 @@ function Scanner({ onDetected, status }: { onDetected: (isbn13: string) => void;
               const isbn = normalizeIsbn(barcode.rawValue);
               if (!isbn) continue;
               const now = Date.now();
-              if (lastRead.current?.isbn === isbn && now - lastRead.current.at < REPEAT_WINDOW_MS) continue;
-              lastRead.current = { isbn, at: now };
+              const previous = lastRead.current;
+              if (previous?.isbn === isbn) {
+                const goneFor = now - previous.seenAt;
+                previous.seenAt = now;
+                // Still the book we just added, so keep ignoring it however long it lingers.
+                if (goneFor < CLEAR_FRAME_MS) continue;
+              }
+              lastRead.current = { isbn, seenAt: now };
               beep();
               navigator.vibrate?.(60);
               setFlash(true);
