@@ -197,9 +197,13 @@ export function PhoneScanner() {
         return;
       }
       setShelfState("sent");
+      const needs =
+        body.needsAttention > 0
+          ? ` ${body.needsAttention} ${body.needsAttention === 1 ? "spine needs" : "spines need"} you.`
+          : "";
       setShelfMessage(
-        body.proposals > 0
-          ? `Found ${body.proposals} ${body.proposals === 1 ? "book" : "books"}. Confirm them on your computer.`
+        body.found > 0
+          ? `Found ${body.found} ${body.found === 1 ? "book" : "books"}.${needs} Confirm on your computer.`
           : "No spines could be read. Try a straighter photo of one shelf.",
       );
     } catch {

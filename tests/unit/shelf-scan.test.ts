@@ -102,7 +102,7 @@ describe("reading spines from a photo", () => {
 
   it("keeps one row per book when two copies stand side by side", async () => {
     vi.stubEnv("GEMINI_API_KEY", "test-key");
-    const readings = await readSpines(
+    const sightings = await readSpines(
       image,
       geminiReturning([
         { title: "Wonder", author: "R. J. Palacio" },
@@ -110,19 +110,43 @@ describe("reading spines from a photo", () => {
         { title: "Holes", author: "Louis Sachar" },
       ]),
     );
-    expect(readings).toEqual([
-      { title: "Wonder", author: "R. J. Palacio" },
-      { title: "Holes", author: "Louis Sachar" },
+    expect(sightings).toEqual([
+      { reading: { title: "Wonder", author: "R. J. Palacio" }, fragment: null },
+      { reading: { title: "Holes", author: "Louis Sachar" }, fragment: null },
     ]);
   });
 
-  it("drops entries with no readable title and keeps a missing author as null", async () => {
+  it("keeps a missing author as null", async () => {
     vi.stubEnv("GEMINI_API_KEY", "test-key");
-    const readings = await readSpines(
+    const sightings = await readSpines(image, geminiReturning([{ title: "Orthodoxy" }]));
+    expect(sightings).toEqual([{ reading: { title: "Orthodoxy", author: null }, fragment: null }]);
+  });
+
+  it("keeps a spine it could see but not read, in its place on the shelf", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    const sightings = await readSpines(
       image,
-      geminiReturning([{ title: "   " }, { author: "Nobody" }, { title: "Orthodoxy" }]),
+      geminiReturning([
+        { title: "Hatchet", author: "Gary Paulsen" },
+        { title: null, fragment: "The Mouse and the" },
+        { title: "Holes", author: "Louis Sachar" },
+      ]),
     );
-    expect(readings).toEqual([{ title: "Orthodoxy", author: null }]);
+    expect(sightings).toEqual([
+      { reading: { title: "Hatchet", author: "Gary Paulsen" }, fragment: null },
+      { reading: null, fragment: "The Mouse and the" },
+      { reading: { title: "Holes", author: "Louis Sachar" }, fragment: null },
+    ]);
+  });
+
+  it("never folds two unread spines together — they are two different books to go and look at", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    const sightings = await readSpines(image, geminiReturning([{ title: null }, { title: "   " }, {}]));
+    expect(sightings).toEqual([
+      { reading: null, fragment: null },
+      { reading: null, fragment: null },
+      { reading: null, fragment: null },
+    ]);
   });
 
   it("refuses to run without a key rather than failing silently", async () => {

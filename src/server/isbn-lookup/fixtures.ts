@@ -32,6 +32,12 @@ const FIXTURES: Record<string, Fixture> = {
     edition: { title: "The Alchemist", publishers: ["HarperOne"], publish_date: "2014", number_of_pages: 197 },
     search: { docs: [{ author_name: ["Paulo Coelho"] }] },
   },
+  // A second printing of the same book, so a spine matched from a shelf photo can offer
+  // more than one edition and still have both of them resolve to a real record.
+  "9780061122415": {
+    edition: { title: "The Alchemist", publishers: ["HarperCollins"], publish_date: "1993", number_of_pages: 208 },
+    search: { docs: [{ author_name: ["Paulo Coelho"] }] },
+  },
 };
 
 export function createFixtureFetch(): Fetch {

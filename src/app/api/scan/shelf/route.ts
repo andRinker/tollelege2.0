@@ -36,7 +36,8 @@ export async function POST(request: Request) {
       { owned },
     );
     await recordScanEvent(getDb(), pairing, "shelf_proposed", scan);
-    return Response.json({ proposals: scan.proposals.length, unmatched: scan.unmatched });
+    const found = scan.slots.length - scan.needsAttention;
+    return Response.json({ found, needsAttention: scan.needsAttention });
   } catch (error) {
     if (error instanceof ShelfScanUnavailableError) {
       console.warn(`Shelf scan unavailable: ${error.message}`);

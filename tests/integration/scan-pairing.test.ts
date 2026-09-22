@@ -167,7 +167,7 @@ describe("phone pairing", () => {
 
       for (let i = 0; i < 10; i++) {
         await assertWithinLimits(db, pairingId, "shelf");
-        await recordScanEvent(db, pairing, "shelf_proposed", { proposals: [], unmatched: 0 });
+        await recordScanEvent(db, pairing, "shelf_proposed", { slots: [], needsAttention: 0 });
       }
       await expect(assertWithinLimits(db, pairingId, "shelf")).rejects.toThrow(LimitError);
       await expect(assertWithinLimits(db, pairingId, "isbn")).resolves.toBeUndefined();
@@ -179,7 +179,7 @@ describe("phone pairing", () => {
       const pairing = await verifyPairing(db, { token: first.token, ...PHONE });
 
       for (let i = 0; i < 10; i++) {
-        await recordScanEvent(db, pairing, "shelf_proposed", { proposals: [], unmatched: 0 });
+        await recordScanEvent(db, pairing, "shelf_proposed", { slots: [], needsAttention: 0 });
       }
       await expect(assertWithinLimits(db, first.pairingId, "shelf")).rejects.toThrow(LimitError);
       await expect(assertWithinLimits(db, second.pairingId, "shelf")).resolves.toBeUndefined();

@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { BookCover } from "@/components/book-cover";
 import { preparePhoto } from "@/components/prepare-photo";
-import type { MatchCandidate, ShelfProposal } from "@/server/shelf-scan";
+import { describeGap } from "@/lib/shelf-gaps";
+import type { MatchCandidate, ShelfSlot } from "@/server/shelf-scan";
 import { cx } from "@/ui/cx";
 import { Button } from "@/ui/components/button";
 import { Dialog } from "@/ui/components/dialog";
@@ -12,9 +13,13 @@ import { LoadingIndicator } from "@/ui/components/loading-indicator";
 import { Menu, MenuItem, MenuTrigger } from "@/ui/components/menu";
 import { Checkbox } from "@/ui/components/selection-controls";
 import { useSnackbar } from "@/ui/components/snackbar";
+import { TextField } from "@/ui/components/text-field";
 import {
   iconBarcodeScanner,
+  iconCheckCircle,
+  iconEdit,
   iconError,
+  iconHelp,
   iconLibraryAdd,
   iconPhotoCamera,
   iconRefresh,
@@ -22,7 +27,7 @@ import {
 import { addCopyAction, quickAddAction, scanShelfAction } from "../actions";
 
 type Row = {
-  proposal: ShelfProposal;
+  slot: ShelfSlot;
   /** Which of the candidate editions the teacher has picked. */
   chosen: number;
   selected: boolean;
@@ -31,9 +36,17 @@ type Row = {
 type State =
   | { kind: "idle" }
   | { kind: "reading" }
-  | { kind: "review"; rows: Row[]; unreadable: string[] }
+  | { kind: "review"; rows: Row[] }
   | { kind: "adding"; done: number; total: number }
   | { kind: "error"; message: string };
+
+/** What ended up filling a gap, as the row should say it. Display only. */
+export type GapFill = { title: string; note: string };
+
+/** A row the scan couldn't finish: no book on it, only a place on the shelf. */
+function isGap(row: Row): boolean {
+  return row.slot.proposal === null;
+}
 
 const CONFIDENCE_LABEL: Record<MatchCandidate["confidence"], { text: string; className: string }> = {
   exact: { text: "Match", className: "text-primary" },
@@ -45,35 +58,56 @@ const CONFIDENCE_LABEL: Record<MatchCandidate["confidence"], { text: string; cla
  * Turns what the reader saw into what the teacher is asked about. Shared by a photo
  * picked here and one sent from a paired phone, so a shelf is reviewed the same way
  * whichever camera took it.
+ *
+ * Every slot becomes a row, including the ones with no book on them. They stay in shelf
+ * order so the list reads like the shelf: the row for a spine nobody could read sits
+ * physically between its neighbours, which is most of the explanation it needs.
  */
-function reviewFrom(proposals: ShelfProposal[]): State {
-  const rows: Row[] = proposals
-    .filter((proposal) => proposal.candidates.length > 0)
-    .map((proposal) => ({
-      proposal,
+function reviewFrom(slots: ShelfSlot[]): State {
+  return {
+    kind: "review",
+    rows: slots.map((slot) => ({
+      slot,
       chosen: 0,
-      // Two kinds of row start unticked: a doubtful match, so nothing wrong is added by
-      // simply not looking, and a book already on the shelves, since re-photographing a
-      // catalogued shelf should not silently multiply its copies.
-      selected: proposal.candidates[0].confidence !== "weak" && !proposal.owned,
-    }));
-  const unreadable = proposals
-    .filter((proposal) => proposal.candidates.length === 0)
-    .map((proposal) => proposal.reading.title);
-  return { kind: "review", rows, unreadable };
+      // Three kinds of row start unticked: a doubtful match, so nothing wrong is added by
+      // simply not looking; a book already on the shelves, since re-photographing a
+      // catalogued shelf should not silently multiply its copies; and a gap, which has
+      // nothing to tick in the first place.
+      selected:
+        slot.proposal !== null &&
+        slot.proposal.candidates[0].confidence !== "weak" &&
+        !slot.proposal.owned,
+    })),
+  };
 }
 
 type ShelfScanDialogProps = {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   /**
-   * Proposals that arrived from a paired phone, to review instead of taking a photo here.
+   * Slots that arrived from a paired phone, to review instead of taking a photo here.
    * The caller remounts on each new shelf, so this is only ever read once.
    */
-  incoming?: ShelfProposal[] | null;
+  incoming?: ShelfSlot[] | null;
+  /** The gap waiting for the next scan, if any. Owned above, since scans arrive there. */
+  armedPosition: number | null;
+  onArm: (position: number | null) => void;
+  /** What has since been added into a gap, by position. */
+  gapResults: Record<number, GapFill>;
+  onFillGap: (position: number, isbn13: string) => Promise<string | null>;
+  onAddByHand: (position: number, title: string) => void;
 };
 
-export function ShelfScanDialog({ isOpen, onOpenChange, incoming }: ShelfScanDialogProps) {
+export function ShelfScanDialog({
+  isOpen,
+  onOpenChange,
+  incoming,
+  armedPosition,
+  onArm,
+  gapResults,
+  onFillGap,
+  onAddByHand,
+}: ShelfScanDialogProps) {
   const [state, setState] = useState<State>(() => (incoming ? reviewFrom(incoming) : { kind: "idle" }));
   const showSnackbar = useSnackbar();
 
@@ -95,24 +129,25 @@ export function ShelfScanDialog({ isOpen, onOpenChange, incoming }: ShelfScanDia
       setState({ kind: "error", message: result.message });
       return;
     }
-    setState(reviewFrom(result.proposals));
+    setState(reviewFrom(result.slots));
   }
 
   async function addSelected(rows: Row[], close: () => void) {
-    const chosen = rows.filter((row) => row.selected);
+    const chosen = rows.filter((row) => row.selected && row.slot.proposal);
     setState({ kind: "adding", done: 0, total: chosen.length });
 
     let added = 0;
     let copied = 0;
     let failed = 0;
     for (const [index, row] of chosen.entries()) {
-      if (row.proposal.owned) {
+      const proposal = row.slot.proposal as NonNullable<ShelfSlot["proposal"]>;
+      if (proposal.owned) {
         // Already catalogued, so this is another physical copy of a book that exists.
-        const result = await addCopyAction(row.proposal.owned.bookId);
+        const result = await addCopyAction(proposal.owned.bookId);
         if (result.ok) copied += 1;
         else failed += 1;
       } else {
-        const result = await quickAddAction(row.proposal.candidates[row.chosen].isbn13);
+        const result = await quickAddAction(proposal.candidates[row.chosen].isbn13);
         if (result.status === "added") added += 1;
         else failed += 1;
       }
@@ -191,8 +226,12 @@ export function ShelfScanDialog({ isOpen, onOpenChange, incoming }: ShelfScanDia
         {state.kind === "review" && (
           <ReviewList
             rows={state.rows}
-            unreadable={state.unreadable}
             onChange={(rows) => setState({ ...state, rows })}
+            armedPosition={armedPosition}
+            onArm={onArm}
+            gapResults={gapResults}
+            onFillGap={onFillGap}
+            onAddByHand={onAddByHand}
           />
         )}
       </div>
@@ -241,16 +280,42 @@ function PhotoPicker({ onPick }: { onPick: (file: File) => void }) {
 
 function ReviewList({
   rows,
-  unreadable,
   onChange,
+  armedPosition,
+  onArm,
+  gapResults,
+  onFillGap,
+  onAddByHand,
 }: {
   rows: Row[];
-  unreadable: string[];
   onChange: (rows: Row[]) => void;
+  armedPosition: number | null;
+  onArm: (position: number | null) => void;
+  gapResults: Record<number, GapFill>;
+  onFillGap: (position: number, isbn13: string) => Promise<string | null>;
+  onAddByHand: (position: number, title: string) => void;
 }) {
+  const [typingAt, setTypingAt] = useState<number | null>(null);
+  const [typed, setTyped] = useState("");
+  const [gapError, setGapError] = useState<{ position: number; message: string } | null>(null);
+
   function update(index: number, changes: Partial<Row>) {
     onChange(rows.map((row, position) => (position === index ? { ...row, ...changes } : row)));
   }
+
+  // What is legible on the shelf, so a gap can be described by its neighbours. A spine
+  // that was read but matched nothing still anchors: the teacher can see that title even
+  // though no catalogue could. Only a spine nobody could read at all is a blank here.
+  // A gap already filled in counts as known too, so the list tightens up as it is worked
+  // down: fill the first of three and the remaining two stop calling themselves 2nd and 3rd.
+  const titles = rows.map((row) =>
+    row.slot.proposal
+      ? (row.slot.proposal.owned?.title ?? row.slot.proposal.candidates[0].title)
+      : (gapResults[row.slot.position]?.title ?? row.slot.reading?.title ?? null),
+  );
+
+  const books = rows.filter((row) => !isGap(row)).length;
+  const outstanding = rows.filter((row) => isGap(row) && !gapResults[row.slot.position]).length;
 
   if (rows.length === 0) {
     return (
@@ -265,15 +330,137 @@ function ReviewList({
   }
 
   return (
-    <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
+    // An armed gap is a standing instruction that the next barcode belongs here, so the
+    // review opts into the wedge that dialogs otherwise swallow. See `use-barcode-wedge`.
+    <div
+      className="flex min-h-0 flex-col gap-3 overflow-y-auto"
+      data-barcode-wedge={armedPosition !== null ? "" : undefined}
+    >
       <p className="text-body-md text-on-surface-variant">
-        {`Found ${rows.length} ${rows.length === 1 ? "book" : "books"}. Untick anything that looks wrong.`}
+        {`Found ${books} ${books === 1 ? "book" : "books"}. `}
+        {outstanding > 0 ? (
+          <span className="text-on-surface">
+            {`${outstanding} ${outstanding === 1 ? "spine needs" : "spines need"} you.`}
+          </span>
+        ) : (
+          "Untick anything that looks wrong."
+        )}
       </p>
 
       <ul className="flex flex-col gap-1">
         {rows.map((row, index) => {
-          const candidate = row.proposal.candidates[row.chosen];
-          const owned = row.proposal.owned;
+          const position = row.slot.position;
+
+          if (isGap(row)) {
+            const filled = gapResults[position];
+            const readTitle = row.slot.reading?.title ?? null;
+            return (
+              <li
+                key={`gap-${position}`}
+                className={cx(
+                  "flex flex-col gap-2 rounded-lg border border-dashed px-3 py-2",
+                  filled ? "border-transparent bg-surface-container" : "border-outline-variant",
+                )}
+              >
+                <div className="flex items-center gap-3">
+                  <Icon
+                    icon={filled ? iconCheckCircle : iconHelp}
+                    size={20}
+                    className={filled ? "text-primary" : "text-on-surface-variant"}
+                  />
+                  <div className="min-w-0 grow">
+                    <p className="truncate text-body-lg">
+                      {filled ? filled.title : (readTitle ?? "Couldn't read this spine")}
+                    </p>
+                    <p className="truncate text-body-sm text-on-surface-variant">
+                      {filled ? filled.note : describeGap(titles, index)}
+                    </p>
+                    {!filled && (readTitle || row.slot.fragment) && (
+                      <p className="truncate text-label-sm text-on-surface-variant">
+                        {readTitle ? "No catalogue had this one" : `Could make out: ${row.slot.fragment}`}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {!filled &&
+                  (armedPosition === position ? (
+                    <div className="flex items-center gap-2 pl-8">
+                      <span className="flex items-center gap-2 text-body-sm text-primary">
+                        <Icon icon={iconBarcodeScanner} size={18} />
+                        Scan this one now, with your phone or a barcode scanner.
+                      </span>
+                      <Button variant="text" size="xs" onPress={() => onArm(null)}>
+                        Cancel
+                      </Button>
+                    </div>
+                  ) : typingAt === position ? (
+                    <form
+                      className="flex items-end gap-2 pl-8"
+                      onSubmit={async (event) => {
+                        event.preventDefault();
+                        const message = await onFillGap(position, typed);
+                        if (message) {
+                          setGapError({ position, message });
+                          return;
+                        }
+                        setGapError(null);
+                        setTypingAt(null);
+                        setTyped("");
+                      }}
+                    >
+                      <TextField
+                        label="ISBN"
+                        value={typed}
+                        onChange={(value) => setTyped(value)}
+                        inputMode="numeric"
+                        autoComplete="off"
+                        autoFocus
+                        className="grow"
+                        inputClassName="tabular-nums"
+                        isInvalid={gapError?.position === position}
+                        errorMessage={gapError?.position === position ? gapError.message : undefined}
+                      />
+                      <Button type="submit" size="sm">
+                        Add
+                      </Button>
+                      <Button variant="text" size="sm" onPress={() => setTypingAt(null)}>
+                        Cancel
+                      </Button>
+                    </form>
+                  ) : (
+                    <div className="flex flex-wrap gap-1 pl-8">
+                      <Button variant="tonal" size="xs" icon={iconBarcodeScanner} onPress={() => onArm(position)}>
+                        Scan it
+                      </Button>
+                      <Button
+                        variant="text"
+                        size="xs"
+                        onPress={() => {
+                          setTypingAt(position);
+                          setTyped("");
+                          setGapError(null);
+                        }}
+                      >
+                        Type ISBN
+                      </Button>
+                      <Button
+                        variant="text"
+                        size="xs"
+                        icon={iconEdit}
+                        onPress={() => onAddByHand(position, readTitle ?? "")}
+                      >
+                        By hand
+                      </Button>
+                    </div>
+                  ))}
+              </li>
+            );
+          }
+
+          const proposal = row.slot.proposal as NonNullable<ShelfSlot["proposal"]>;
+          const candidate = proposal.candidates[row.chosen];
+          const owned = proposal.owned;
           const label = owned
             ? {
                 text:
@@ -284,7 +471,7 @@ function ReviewList({
               }
             : CONFIDENCE_LABEL[candidate.confidence];
           return (
-            <li key={`${row.proposal.reading.title}-${index}`} className="flex items-center gap-3 rounded-lg px-1 py-2">
+            <li key={`book-${position}`} className="flex items-center gap-3 rounded-lg px-1 py-2">
               <Checkbox
                 isSelected={row.selected}
                 onChange={(selected) => update(index, { selected })}
@@ -297,11 +484,11 @@ function ReviewList({
               <div className="min-w-0 grow">
                 <p className="truncate text-body-lg">{owned ? owned.title : candidate.title}</p>
                 <p className="truncate text-body-sm text-on-surface-variant">
-                  {candidate.authors.join(", ") || row.proposal.reading.author || "Unknown author"}
+                  {candidate.authors.join(", ") || row.slot.reading?.author || "Unknown author"}
                 </p>
                 <p className={cx("text-label-sm", label.className)}>{label.text}</p>
               </div>
-              {!owned && row.proposal.candidates.length > 1 && (
+              {!owned && proposal.candidates.length > 1 && (
                 <MenuTrigger>
                   <Button variant="text" size="xs">
                     Edition
@@ -314,8 +501,8 @@ function ReviewList({
                       if (!Number.isNaN(next)) update(index, { chosen: next });
                     }}
                   >
-                    {row.proposal.candidates.map((option, position) => (
-                      <MenuItem key={option.isbn13} id={String(position)}>
+                    {proposal.candidates.map((option, optionIndex) => (
+                      <MenuItem key={option.isbn13} id={String(optionIndex)}>
                         {`${option.title} — ${option.authors[0] ?? "Unknown"}`}
                       </MenuItem>
                     ))}
@@ -326,20 +513,6 @@ function ReviewList({
           );
         })}
       </ul>
-
-      {unreadable.length > 0 && (
-        <div className="rounded-lg bg-surface-container px-4 py-3">
-          <p className="flex items-center gap-2 text-body-md">
-            <Icon icon={iconBarcodeScanner} size={18} />
-            {`${unreadable.length} ${unreadable.length === 1 ? "spine" : "spines"} couldn't be matched — scan ${unreadable.length === 1 ? "it" : "them"} by barcode:`}
-          </p>
-          <ul className="mt-1 list-disc pl-8 text-body-sm text-on-surface-variant">
-            {unreadable.map((title) => (
-              <li key={title}>{title}</li>
-            ))}
-          </ul>
-        </div>
-      )}
     </div>
   );
 }

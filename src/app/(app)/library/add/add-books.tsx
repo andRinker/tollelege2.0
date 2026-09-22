@@ -19,7 +19,7 @@ import {
 import type { ReadingLevelSystem } from "@/db/schema/enums";
 import { formatIsbn13, normalizeIsbn } from "@/lib/isbn";
 import type { QuickAddResult } from "@/server/catalog";
-import type { ShelfProposal } from "@/server/shelf-scan";
+import type { ShelfSlot } from "@/server/shelf-scan";
 import { cx } from "@/ui/cx";
 import { Button, LinkButton } from "@/ui/components/button";
 import { Dialog } from "@/ui/components/dialog";
@@ -50,7 +50,7 @@ import {
   undoQuickAddAction,
 } from "../actions";
 import { type PairedPhone, PhonePairing } from "./phone-pairing";
-import { ShelfScanDialog } from "./shelf-scan";
+import { type GapFill, ShelfScanDialog } from "./shelf-scan";
 import { type ScanFeedEvent, useScanFeed } from "./use-scan-feed";
 
 type Suggestions = { tags: string[]; locations: string[] };
@@ -94,7 +94,51 @@ export function AddBooks({ readingLevelSystem, suggestions, pairedPhones, scanCu
   const [manual, setManual] = useState<BookFormValue | null>(null);
   const [shelfOpen, setShelfOpen] = useState(false);
   const [phoneScanning, setPhoneScanning] = useState(false);
-  const [incomingShelf, setIncomingShelf] = useState<{ proposals: ShelfProposal[]; at: number } | null>(null);
+  const [incomingShelf, setIncomingShelf] = useState<{ slots: ShelfSlot[]; at: number } | null>(null);
+  /**
+   * A gap in the shelf review waiting for the next scan. It lives here rather than in the
+   * dialog because this is where scans arrive — from the phone, the USB wedge or the
+   * camera — and an armed gap is simply the answer to "where should the next one go?".
+   */
+  const [armedGap, setArmedGap] = useState<number | null>(null);
+  const [gapFills, setGapFills] = useState<Record<number, GapFill>>({});
+  /** The gap the manual form was opened for, so its row can be closed off on save. */
+  const [handGap, setHandGap] = useState<number | null>(null);
+
+  const fillGap = useCallback(
+    (position: number, fill: GapFill) => {
+      setGapFills((current) => ({ ...current, [position]: fill }));
+      setArmedGap(null);
+      router.refresh();
+    },
+    [router],
+  );
+
+  /** Returns a message to show on the row, or null when the gap is filled. */
+  async function addIntoGap(position: number, raw: string): Promise<string | null> {
+    const isbn13 = normalizeIsbn(raw);
+    if (!isbn13) return "That isn't a valid ISBN.";
+    const response = await quickAddAction(isbn13);
+    switch (response.status) {
+      case "added":
+        fillGap(position, {
+          title: response.result.title,
+          note:
+            response.result.outcome === "copy_added"
+              ? `Added a copy — ${response.result.totalCopies} in all`
+              : "Added",
+        });
+        return null;
+      case "not_found":
+        return "No catalogue has that ISBN.";
+      case "unavailable":
+        return "Couldn't reach the catalogues. Try again.";
+      case "error":
+        return response.message;
+      default:
+        return "That isn't a valid ISBN.";
+    }
+  }
 
   /**
    * A paired phone has already done the adding by the time we hear about it, so these
@@ -106,6 +150,16 @@ export function AddBooks({ readingLevelSystem, suggestions, pairedPhones, scanCu
     const scanned: ScanEntry[] = [];
     for (const event of events) {
       if (event.kind === "book_added") {
+        if (armedGap !== null) {
+          fillGap(armedGap, {
+            title: event.payload.result.title,
+            note:
+              event.payload.result.outcome === "copy_added"
+                ? `Added a copy — ${event.payload.result.totalCopies} in all`
+                : "Added",
+          });
+          continue;
+        }
         scanned.push({
           key: `phone-${event.seq}`,
           isbn13: event.payload.isbn13,
@@ -121,7 +175,10 @@ export function AddBooks({ readingLevelSystem, suggestions, pairedPhones, scanCu
         });
       } else {
         // A shelf from the phone still gets confirmed here, exactly like one taken here.
-        setIncomingShelf({ proposals: event.payload.proposals, at: event.seq });
+        // A new shelf resets everything the last one was waiting on.
+        setArmedGap(null);
+        setGapFills({});
+        setIncomingShelf({ slots: event.payload.slots, at: event.seq });
         setShelfOpen(true);
       }
     }
@@ -130,7 +187,7 @@ export function AddBooks({ readingLevelSystem, suggestions, pairedPhones, scanCu
     setRapid(true);
     setEntries((current) => [...scanned.reverse(), ...current]);
     router.refresh();
-  }, [router]);
+  }, [router, armedGap, fillGap]);
 
   useScanFeed(true, scanCursor, onScanEvents);
 
@@ -151,6 +208,11 @@ export function AddBooks({ readingLevelSystem, suggestions, pairedPhones, scanCu
   }
 
   async function quickAdd(isbn13: string) {
+    // An armed gap is asking for exactly this scan, so it takes precedence over the list.
+    if (armedGap !== null) {
+      await addIntoGap(armedGap, isbn13);
+      return;
+    }
     const key = `${isbn13}-${Date.now()}`;
     setEntries((current) => [{ key, isbn13, state: "loading" }, ...current]);
     const response = await quickAddAction(isbn13);
@@ -179,7 +241,9 @@ export function AddBooks({ readingLevelSystem, suggestions, pairedPhones, scanCu
     }
     setInputError(null);
     refocus();
-    if (rapid) void quickAdd(isbn13);
+    // An armed gap already said where this scan goes, so it doesn't wait on rapid scan
+    // being switched on — `quickAdd` hands it straight to the gap.
+    if (rapid || armedGap !== null) void quickAdd(isbn13);
     else void lookUp(isbn13);
   }
 
@@ -278,8 +342,19 @@ export function AddBooks({ readingLevelSystem, suggestions, pairedPhones, scanCu
       <ShelfScanDialog
         key={incomingShelf?.at ?? "own-photo"}
         isOpen={shelfOpen}
-        onOpenChange={setShelfOpen}
-        incoming={incomingShelf?.proposals ?? null}
+        onOpenChange={(open) => {
+          setShelfOpen(open);
+          if (!open) setArmedGap(null);
+        }}
+        incoming={incomingShelf?.slots ?? null}
+        armedPosition={armedGap}
+        onArm={setArmedGap}
+        gapResults={gapFills}
+        onFillGap={addIntoGap}
+        onAddByHand={(position, title) => {
+          setHandGap(position);
+          setManual({ ...EMPTY_BOOK, title });
+        }}
       />
 
       <BarcodeScannerDialog
@@ -287,7 +362,7 @@ export function AddBooks({ readingLevelSystem, suggestions, pairedPhones, scanCu
         onOpenChange={setScannerOpen}
         title={rapid ? "Rapid scan" : "Scan a barcode"}
         onDetected={(isbn13) => {
-          if (rapid) {
+          if (rapid || armedGap !== null) {
             void quickAdd(isbn13);
           } else {
             setScannerOpen(false);
@@ -315,6 +390,10 @@ export function AddBooks({ readingLevelSystem, suggestions, pairedPhones, scanCu
         suggestions={suggestions}
         onAdded={(title, bookId, isbn13) => {
           setManual(null);
+          if (handGap !== null) {
+            fillGap(handGap, { title, note: "Added by hand" });
+            setHandGap(null);
+          }
           if (isbn13) setEntries((current) => current.filter((entry) => !(entry.state === "not_found" && entry.isbn13 === isbn13)));
           showSnackbar({ message: `Added ${title}`, action: { label: "View", onAction: () => router.push(`/library/${bookId}`) } });
           refocus();
