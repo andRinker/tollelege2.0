@@ -302,6 +302,8 @@ export type BookListItem = {
   readingLevel: string | null;
   tags: string[];
   location: string | null;
+  /** Offered to connected teachers; the list marks the titles held back. */
+  lendable: boolean;
   totalCopies: number;
   availableCopies: number;
 };
@@ -370,6 +372,7 @@ export async function listBooks(db: Database, teacherId: string, filters: BookLi
         readingLevel: books.readingLevel,
         tags: books.tags,
         location: books.location,
+        lendable: books.lendable,
         totalCopies: sql<number>`coalesce(${copyCounts.total}, 0)`.mapWith(Number),
         availableCopies: sql<number>`coalesce(${copyCounts.available}, 0)`.mapWith(Number),
       })
@@ -414,6 +417,16 @@ export async function catalogSummary(db: Database, teacherId: string) {
     readingLevels: levelRows.map((row) => row.value as string),
     locations: locationRows.map((row) => row.value as string),
   };
+}
+
+/** Everything the edit form shows about one title, without its copies or history. */
+export async function getBookForEdit(db: Database, teacherId: string, bookId: string) {
+  const [book] = await db
+    .select()
+    .from(books)
+    .where(and(eq(books.id, bookId), eq(books.teacherId, teacherId)));
+  if (!book) throw new NotFoundError("That book isn't in your library.");
+  return book;
 }
 
 export async function getBookDetail(db: Database, teacherId: string, bookId: string) {

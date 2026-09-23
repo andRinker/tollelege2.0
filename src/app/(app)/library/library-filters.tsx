@@ -8,7 +8,8 @@ import { IconButton } from "@/ui/components/icon-button";
 import { Menu, MenuItem, MenuTrigger } from "@/ui/components/menu";
 import { LinearProgress } from "@/ui/components/progress";
 import { SearchField } from "@/ui/components/text-field";
-import { iconSort } from "@/ui/icons/generated";
+import { iconGridView, iconSort, iconViewList } from "@/ui/icons/generated";
+import { LIBRARY_VIEW_COOKIE, type LibraryView } from "./filters";
 
 type Props = {
   query: string;
@@ -17,6 +18,7 @@ type Props = {
   level?: string;
   bin?: string;
   sort: string;
+  view: LibraryView;
   tags: string[];
   readingLevels: string[];
   locations: string[];
@@ -28,7 +30,7 @@ const SORTS = [
   { id: "recent", label: "Recently added" },
 ];
 
-export function LibraryFilters({ query, availability, tag, level, bin, sort, tags, readingLevels, locations }: Props) {
+export function LibraryFilters({ query, availability, tag, level, bin, sort, view, tags, readingLevels, locations }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -45,6 +47,12 @@ export function LibraryFilters({ query, availability, tag, level, bin, sort, tag
     next.delete("page");
     const queryString = next.toString();
     startTransition(() => router.replace(queryString ? `${pathname}?${queryString}` : pathname, { scroll: false }));
+  }
+
+  function changeView(next: LibraryView) {
+    // A cookie rather than the URL, so the library opens the way it was left on this device.
+    document.cookie = `${LIBRARY_VIEW_COOKIE}=${next};path=/;max-age=31536000;samesite=lax`;
+    startTransition(() => router.refresh());
   }
 
   useEffect(() => () => clearTimeout(debounce.current), []);
@@ -94,6 +102,24 @@ export function LibraryFilters({ query, availability, tag, level, bin, sort, tag
           <ConnectedButton id="all">All</ConnectedButton>
           <ConnectedButton id="available">Available</ConnectedButton>
           <ConnectedButton id="out">Checked out</ConnectedButton>
+        </ConnectedButtonGroup>
+        <ConnectedButtonGroup
+          aria-label="Layout"
+          selectionMode="single"
+          disallowEmptySelection
+          selectedKeys={[view]}
+          onSelectionChange={(keys) => {
+            const next = [...keys][0];
+            if (next === "grid" || next === "list") changeView(next);
+          }}
+          className="ml-auto"
+        >
+          <ConnectedButton id="grid" icon={iconGridView}>
+            Grid
+          </ConnectedButton>
+          <ConnectedButton id="list" icon={iconViewList}>
+            List
+          </ConnectedButton>
         </ConnectedButtonGroup>
       </div>
 
