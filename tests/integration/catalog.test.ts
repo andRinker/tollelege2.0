@@ -19,7 +19,9 @@ import {
   undoQuickAdd,
   updateBookDetails,
 } from "@/server/catalog";
+import { checkInLoan, checkOutBook, recentActivity, undoCheckIn } from "@/server/circulation";
 import { ConflictError, NotFoundError } from "@/server/errors";
+import { getStudentDetail } from "@/server/roster";
 import type { BookMetadata } from "@/server/isbn-lookup";
 import { createTeacher, createTestDb, type TestDatabase } from "../helpers/test-db";
 
@@ -59,7 +61,7 @@ const frogAndToad: BookMetadata = {
 async function checkOut(db: Database, teacherId: string, copyId: string) {
   const [klass] = await db.insert(classes).values({ teacherId, name: "Room 1", schoolYear: "2026–27" }).returning();
   const [student] = await db.insert(students).values({ teacherId, classId: klass.id, firstName: "Ada" }).returning();
-  const [loan] = await db.insert(loans).values({ teacherId, copyId, studentId: student.id }).returning();
+  const [loan] = await db.insert(loans).values({ bookTitle: "A book", teacherId, copyId, studentId: student.id }).returning();
   return loan;
 }
 
@@ -170,7 +172,7 @@ describe("catalog", () => {
     expect(page.items).toHaveLength(1);
   });
 
-  it("guards deleting books and copies that have history", async () => {
+  it("won't delete a book or copy while it is checked out", async () => {
     const { bookId, copyIds } = await createBook(db, teacher, bookInput({ title: "Hatchet" }), 2);
     await checkOut(db, teacher, copyIds[0]);
 
@@ -186,6 +188,45 @@ describe("catalog", () => {
     const lonely = await createBook(db, teacher, bookInput({ title: "Single copy" }));
     await expect(deleteCopy(db, teacher, lonely.copyIds[0])).rejects.toBeInstanceOf(ConflictError);
     await deleteBook(db, teacher, lonely.bookId);
+  });
+
+  it("deletes a book students have read, and keeps it in their reading history", async () => {
+    const t = await createTeacher(db, "History Teacher");
+    const [klass] = await db.insert(classes).values({ teacherId: t, name: "Room 4", schoolYear: "2026–27" }).returning();
+    const [ada] = await db.insert(students).values({ teacherId: t, classId: klass.id, firstName: "Ada" }).returning();
+    const { bookId, copyIds } = await createBook(db, t, bookInput({ title: "Hatchet", authors: ["Gary Paulsen"] }), 2);
+
+    // Both out at once, so they take copy 1 and copy 2.
+    const first = await checkOutBook(db, t, { studentId: ada.id, bookId, dueOn: null });
+    const second = await checkOutBook(db, t, { studentId: ada.id, bookId, dueOn: null });
+    expect([first.copyNumber, second.copyNumber]).toEqual([1, 2]);
+    await expect(deleteBook(db, t, bookId)).rejects.toThrow("checked out");
+    await checkInLoan(db, t, first.loanId);
+    await checkInLoan(db, t, second.loanId);
+
+    // The copy goes first. Its checkout stays on the book's page, just without a copy number.
+    await deleteCopy(db, t, copyIds[0]);
+    const detail = await getBookDetail(db, t, bookId);
+    expect(detail.copies.map((copy) => copy.id)).toEqual([copyIds[1]]);
+    expect(detail.history.map((loan) => loan.copyNumber).sort()).toEqual([2, null]);
+
+    // A title fixed after the fact is what the history shows while the book is still here.
+    await updateBookDetails(db, t, bookId, { title: "Hatchet (Anniversary Edition)" });
+    expect((await getStudentDetail(db, t, ada.id)).history[0].title).toBe("Hatchet (Anniversary Edition)");
+
+    await deleteBook(db, t, bookId);
+    await expect(getBookDetail(db, t, bookId)).rejects.toBeInstanceOf(NotFoundError);
+
+    // Once it's gone, the title it went out under.
+    const { history } = await getStudentDetail(db, t, ada.id);
+    expect(history).toHaveLength(2);
+    expect(history[0]).toMatchObject({ title: "Hatchet", authors: ["Gary Paulsen"], bookId: null, coverUrl: null });
+    const activity = await recentActivity(db, t);
+    expect(activity.filter((item) => item.title === "Hatchet")).toHaveLength(4);
+    expect(activity.every((item) => item.bookId === null)).toBe(true);
+
+    // Undoing a return needs a copy to put back in the student's hands.
+    await expect(undoCheckIn(db, t, first.loanId)).rejects.toThrow("That copy has been deleted");
   });
 
   it("keeps every catalog operation inside the teacher's own library", async () => {

@@ -47,6 +47,7 @@ describe("rosters", () => {
       publisher: null, publishedYear: null, pageCount: null, readingLevel: null, tags: [], location: null, notes: null, metadataSource: "manual",
     });
     await db.insert(loans).values({
+      bookTitle: "A book",
       teacherId: teacher,
       copyId: copyIds[0],
       studentId,

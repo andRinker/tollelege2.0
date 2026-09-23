@@ -243,7 +243,7 @@ export default async function DashboardPage() {
                           </span>
                         }
                         trailing={<span className="tabular-nums">{formatRecentInstant(item.at, settings.timeZone, today)}</span>}
-                        href={`/library/${item.bookId}`}
+                        href={item.bookId ? `/library/${item.bookId}` : undefined}
                       />
                     );
                   })}

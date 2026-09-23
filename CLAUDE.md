@@ -49,6 +49,7 @@ npx vercel link && npx vercel env pull .env.local
 - Validate server action input with Zod before calling the data layer.
 - UI is built from the M3E components in `src/ui/` and theme tokens such as `bg-surface-container` and `text-on-surface`. Don't hardcode colors.
 - Student data stays minimal: names and an optional student ID only.
+- **A checkout outlives the book.** A student's reading history belongs to the student, so deleting a book or copy they read must not erase it. Each `loans` row records `book_title` and `book_authors` when it's made, and `copy_id`/`book_id` go null on delete. Readers show the book's live title while it exists and the recorded one after, so `leftJoin` from `loans`, never `innerJoin`. Only a book still out with a student can't be deleted, and the `loans_open_has_copy` check enforces that in the database too. Those two foreign keys are `ON DELETE SET NULL (column)` in the migration, because a plain `SET NULL` would also null `teacher_id` and fail. drizzle can't write the column list, so carry it across by hand if the keys are ever regenerated.
 
 ## Book metadata
 

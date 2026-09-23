@@ -80,6 +80,22 @@ test("a teacher signs up, builds a catalog and roster, and checks a book out and
     await expect(page.getByRole("list", { name: /history/i }).getByText(/Frog and Toad Are Friends/)).toBeVisible();
   });
 
+  await test.step("delete the book, and the student still has it in their history", async () => {
+    const studentPage = page.url();
+    await page.getByRole("list", { name: /history/i }).getByRole("link", { name: /Frog and Toad Are Friends/ }).click();
+    await expect(page.getByRole("heading", { name: "Frog and Toad Are Friends" })).toBeVisible();
+    await page.getByRole("button", { name: "More actions" }).click();
+    await page.getByRole("menuitem", { name: "Delete book" }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
+    await expect(page).toHaveURL(/\/library$/);
+
+    await page.goto(studentPage);
+    const history = page.getByRole("list", { name: /history/i });
+    await expect(history.getByText("Frog and Toad Are Friends")).toBeVisible();
+    // Still listed, but there's no book page left to open.
+    await expect(history.getByRole("link", { name: /Frog and Toad Are Friends/ })).toHaveCount(0);
+  });
+
   // Every destination added to the bar takes width from the labels already there, and the
   // longest one is bold while you're on it. 360px is the narrowest phone still in use.
   await test.step("every navigation label fits a narrow phone", async () => {

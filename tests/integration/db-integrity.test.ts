@@ -45,10 +45,10 @@ describe("database integrity", () => {
     const b = await seedLibrary(teacherB, "9780064440202");
 
     await expect(
-      testDb.db.insert(loans).values({ teacherId: teacherA, copyId: a.copy.id, studentId: b.student.id }),
+      testDb.db.insert(loans).values({ bookTitle: "A book", teacherId: teacherA, copyId: a.copy.id, studentId: b.student.id }),
     ).rejects.toThrow();
     await expect(
-      testDb.db.insert(loans).values({ teacherId: teacherB, copyId: a.copy.id, studentId: b.student.id }),
+      testDb.db.insert(loans).values({ bookTitle: "A book", teacherId: teacherB, copyId: a.copy.id, studentId: b.student.id }),
     ).rejects.toThrow();
   });
 
@@ -66,10 +66,10 @@ describe("database integrity", () => {
   it("allows only one open loan per copy", async () => {
     const lib = await seedLibrary(teacherA, "9780439708180");
     const { db } = testDb;
-    await db.insert(loans).values({ teacherId: teacherA, copyId: lib.copy.id, studentId: lib.student.id });
+    await db.insert(loans).values({ bookTitle: "A book", teacherId: teacherA, copyId: lib.copy.id, studentId: lib.student.id });
 
     await expect(
-      db.insert(loans).values({ teacherId: teacherA, copyId: lib.copy.id, studentId: lib.student.id }),
+      db.insert(loans).values({ bookTitle: "A book", teacherId: teacherA, copyId: lib.copy.id, studentId: lib.student.id }),
     ).rejects.toThrow();
 
     await db
@@ -77,7 +77,7 @@ describe("database integrity", () => {
       .set({ closedAt: new Date(), closeReason: "returned" })
       .where(eq(loans.copyId, lib.copy.id));
     await expect(
-      db.insert(loans).values({ teacherId: teacherA, copyId: lib.copy.id, studentId: lib.student.id }),
+      db.insert(loans).values({ bookTitle: "A book", teacherId: teacherA, copyId: lib.copy.id, studentId: lib.student.id }),
     ).resolves.toBeDefined();
   });
 
@@ -101,6 +101,7 @@ describe("database integrity", () => {
     const lib = await seedLibrary(teacherA, "9780316015844");
     await expect(
       db.insert(loans).values({
+        bookTitle: "A book",
         teacherId: teacherA,
         copyId: lib.copy.id,
         studentId: lib.student.id,
@@ -113,7 +114,7 @@ describe("database integrity", () => {
     const { db } = testDb;
     const teacherC = await createTeacher(db, "Teacher C");
     const lib = await seedLibrary(teacherC, "9780062315007");
-    await db.insert(loans).values({ teacherId: teacherC, copyId: lib.copy.id, studentId: lib.student.id });
+    await db.insert(loans).values({ bookTitle: "A book", teacherId: teacherC, copyId: lib.copy.id, studentId: lib.student.id });
 
     await db.delete(user).where(eq(user.id, teacherC));
 
