@@ -37,6 +37,8 @@ npx vercel link && npx vercel env pull .env.local
 
 `main` is protected: both CI checks (`Types, lint, tests` and `End-to-end`) must pass before anything lands, and the rule applies to admins. Work goes through a pull request; a direct push to `main` is rejected. Merging deploys to production, and `vercel-build` runs `db:migrate` against Neon before building.
 
+**Turn on auto-merge for every pull request you open here**, using the merge method (not squash), right after creating it. That's the owner's standing instruction, so don't wait to be asked. Branch protection still holds the merge until both checks pass, so auto-merge never skips CI. It does mean the PR goes to production without anyone reading it first, so before opening one, say anything in it that deserves a second look, such as a migration that rewrites existing rows. If a PR shouldn't land yet, open it as a draft, which auto-merge won't touch, and say why.
+
 `scripts/vercel-ignore-build.mjs` can gate the deploy itself on CI, for when branch protection isn't available. It is written and tested but **not wired up** — it needs `GITHUB_CI_TOKEN` in Vercel and the Ignored Build Step command set.
 
 ## Rules
