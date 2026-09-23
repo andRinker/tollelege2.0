@@ -88,7 +88,10 @@ export default function PrivacyPage() {
             The one exception is the site&rsquo;s administrator, who looks after {APP_NAME} for your school. An
             administrator can see every account&rsquo;s library, classes, students and checkouts, and can work inside an
             account to set up or fix a library on a teacher&rsquo;s behalf, for up to an hour at a time. They can also sign
-            an account out everywhere or delete it. Each of these is recorded in a log with who did it and when, and that
+            an account out everywhere or delete it. They can also create an account for a colleague who hasn&rsquo;t signed
+            up yet, using only a name and school email, so that a library can be ready for them; the first time that
+            colleague signs in with Google using that email, the account and everything in it is theirs, and they can ask
+            for it to be deleted like any other. Each of these is recorded in a log with who did it and when, and that
             record is kept even after an account is deleted.
           </p>
           <p>

@@ -3,6 +3,7 @@ import { and, count, desc, eq, gt, gte, isNotNull, isNull, max, or, sql } from "
 import { notFound, redirect } from "next/navigation";
 import type { Database } from "@/db/client";
 import {
+  account,
   type AdminAction,
   adminAudit,
   books,
@@ -18,7 +19,8 @@ import {
   teacherConnections,
   user,
 } from "@/db/schema";
-import { isAdmin } from "@/lib/admin-access";
+import { randomUUID } from "node:crypto";
+import { adminEmails, isAdmin } from "@/lib/admin-access";
 import { ConflictError, NotFoundError } from "./errors";
 import { revokeAllPairings } from "./scan-pairing";
 import { getSession } from "./session";
@@ -93,12 +95,21 @@ function usageSubqueries(db: Database) {
     .from(loans)
     .groupBy(loans.teacherId)
     .as("loan_counts");
+  // Their own sessions only: an admin acting as them isn't them being active.
   const lastSeen = db
     .select({ userId: session.userId, lastActiveAt: max(session.updatedAt).as("last_active_at") })
     .from(session)
+    .where(isNull(session.impersonatedBy))
     .groupBy(session.userId)
     .as("last_seen");
-  return { titleCounts, copyCounts, studentCounts, classCounts, loanCounts, lastSeen };
+  // A way in of their own: a linked Google account or a password. None means an admin
+  // created the account and they haven't claimed it yet.
+  const logins = db
+    .select({ userId: account.userId, logins: count().as("logins") })
+    .from(account)
+    .groupBy(account.userId)
+    .as("logins");
+  return { titleCounts, copyCounts, studentCounts, classCounts, loanCounts, lastSeen, logins };
 }
 
 export type TeacherAccount = {
@@ -109,6 +120,8 @@ export type TeacherAccount = {
   createdAt: Date;
   /** The last time any of their sessions was used or refreshed. Null once they've signed out everywhere. */
   lastActiveAt: Date | null;
+  /** False for an account an admin created that its teacher hasn't signed in to yet. */
+  hasSignedIn: boolean;
   titles: number;
   copies: number;
   classes: number;
@@ -133,6 +146,7 @@ async function selectAccounts(db: Database, where?: ReturnType<typeof eq>): Prom
       students: sql<number>`coalesce(${q.studentCounts.students}, 0)`.mapWith(Number),
       checkouts: sql<number>`coalesce(${q.loanCounts.checkouts}, 0)`.mapWith(Number),
       out: sql<number>`coalesce(${q.loanCounts.out}, 0)`.mapWith(Number),
+      hasSignedIn: sql<boolean>`coalesce(${q.logins.logins}, 0) > 0`,
     })
     .from(user)
     .leftJoin(q.titleCounts, eq(q.titleCounts.teacherId, user.id))
@@ -141,9 +155,42 @@ async function selectAccounts(db: Database, where?: ReturnType<typeof eq>): Prom
     .leftJoin(q.studentCounts, eq(q.studentCounts.teacherId, user.id))
     .leftJoin(q.loanCounts, eq(q.loanCounts.teacherId, user.id))
     .leftJoin(q.lastSeen, eq(q.lastSeen.userId, user.id))
+    .leftJoin(q.logins, eq(q.logins.userId, user.id))
     .where(where)
     .orderBy(desc(user.createdAt));
   return rows.map((row) => ({ ...row, lastActiveAt: row.lastActiveAt ? new Date(row.lastActiveAt) : null }));
+}
+
+/**
+ * Creates an account for a colleague who hasn't signed up, so an admin can build their
+ * library first (by acting as them) and hand it over ready to use.
+ *
+ * It has no way in yet: no password and no linked Google account. The first time they
+ * sign in with Google using this email, Better Auth links Google to this account rather
+ * than making a new one, so they arrive in the library that was built for them. That
+ * only happens for an account whose email is already verified (`requireLocalEmailVerified`),
+ * so it is created verified: the admin is vouching for the address. It stays safe because
+ * the only ways in are that person's own Google sign-in, or a password reset sent to their
+ * inbox.
+ */
+export async function createColleagueAccount(
+  db: Database,
+  admin: Admin,
+  input: { name: string; email: string },
+): Promise<{ id: string }> {
+  const email = input.email.trim().toLowerCase();
+  const name = input.name.trim();
+  // An admin address would be an admin the moment it existed, verified, with no one in it.
+  if (adminEmails().has(email)) throw new ConflictError("That's an admin's address. They can sign up themselves.");
+  const [existing] = await db.select({ id: user.id }).from(user).where(eq(user.email, email));
+  if (existing) throw new ConflictError("There's already an account with that email.");
+
+  const id = randomUUID();
+  await db.transaction(async (tx) => {
+    await tx.insert(user).values({ id, name, email, emailVerified: true });
+    await audit(tx, admin, "created_account", { id, email });
+  });
+  return { id };
 }
 
 /** Every account, newest first, with counts only: nothing from inside a library. */

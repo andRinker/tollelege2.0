@@ -8,6 +8,7 @@ import { PageHeader } from "@/ui/components/expressive";
 import { List, ListItem } from "@/ui/components/list";
 import { Avatar } from "@/ui/components/expressive";
 import { AuditList } from "./audit-list";
+import { CreateColleague } from "./create-colleague";
 
 export const metadata: Metadata = { title: "Admin" };
 
@@ -73,6 +74,7 @@ export default async function AdminPage() {
         <h2 id="accounts-heading" className="text-title-lg-em">
           Accounts
         </h2>
+        <CreateColleague />
         <List aria-label="Accounts">
           {accounts.map((account) => (
             <ListItem
@@ -85,6 +87,7 @@ export default async function AdminPage() {
                   <span className="truncate">
                     {account.email}
                     {!account.emailVerified && " · unverified"}
+                    {!account.hasSignedIn && " · created by an admin"}
                   </span>
                   <span className="truncate">
                     {`${plural(account.titles, "title")} · ${plural(account.students, "student")} · ${plural(account.checkouts, "checkout")}`}
@@ -93,7 +96,11 @@ export default async function AdminPage() {
               }
               trailing={
                 <span className="tabular-nums">
-                  {account.lastActiveAt ? formatRecentInstant(account.lastActiveAt, settings.timeZone, today) : "Signed out"}
+                  {!account.hasSignedIn
+                    ? "Hasn't signed in yet"
+                    : account.lastActiveAt
+                      ? formatRecentInstant(account.lastActiveAt, settings.timeZone, today)
+                      : "Signed out"}
                 </span>
               }
             />

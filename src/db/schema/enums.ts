@@ -46,5 +46,5 @@ export function sqlList(values: readonly string[]): string {
 }
 
 /** What an admin did to or with a teacher's account. Recorded in `admin_audit`. */
-export const adminActions = ["viewed_account", "started_acting", "stopped_acting", "signed_out", "deleted_account"] as const;
+export const adminActions = ["created_account", "viewed_account", "started_acting", "stopped_acting", "signed_out", "deleted_account"] as const;
 export type AdminAction = (typeof adminActions)[number];

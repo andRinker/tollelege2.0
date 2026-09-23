@@ -111,6 +111,8 @@ Consequences, all deliberate:
 - Acting lasts at most an hour, can't target another admin or yourself, and hides `/admin` while it lasts. Stopping revokes any phone paired during it, which would otherwise keep adding to their library until midnight.
 - While acting, the layout doesn't save the browser's time zone into the teacher's settings: it's the admin's browser, not theirs. Sign out is replaced by "Back to your account", since signing out would end the teacher's own phone pairings.
 - Deleting an account is refused while a book is lent to or from another teacher, and for the admin's own account. It needs the account's email typed to confirm.
+- **An admin can create an account for a colleague who hasn't signed up**, build it by acting as them, and hand it over. It has no login of its own; their first Google sign-in with that email links to it rather than making a new account. Better Auth only links into an account whose email is **verified** (`requireLocalEmailVerified`), so `createColleagueAccount` creates it verified, with the admin vouching for the address. `tests/integration/colleague-account.test.ts` proves the handover through Better Auth's own linking routine and the app's real `accountOptions`, including the control case that an unverified account is refused. Password sign-up with that email says it's taken; "Forgot password" still works, since a reset creates the password.
+- "Last active" counts only a teacher's own sessions, never ones an admin started by acting as them.
 - `/privacy` says what an admin can see and do, and must keep matching.
 
 ## Lending library

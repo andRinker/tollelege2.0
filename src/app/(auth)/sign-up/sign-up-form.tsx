@@ -24,7 +24,8 @@ export function SignUpForm({ googleEnabled }: { googleEnabled: boolean }) {
     if (signUpError) {
       setError(
         signUpError.code === "USER_ALREADY_EXISTS" || signUpError.code === "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL"
-          ? "An account with that email already exists. Sign in instead."
+          ? // Also what a colleague sees whose account an admin made for them, and which has no password yet.
+            "An account with that email already exists. Sign in instead, with Google, or use “Forgot password?” to set a password."
           : (signUpError.message ?? "We couldn't create your account. Try again."),
       );
       setPending(false);

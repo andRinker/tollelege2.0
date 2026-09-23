@@ -5,6 +5,7 @@ import { nextCookies } from "better-auth/next-js";
 import { getDb } from "@/db/client";
 import * as schema from "@/db/schema";
 import { actAs } from "@/lib/act-as";
+import { accountOptions } from "@/lib/auth-options";
 import { APP_NAME } from "@/lib/brand";
 import { sendPasswordResetEmail } from "@/lib/email";
 
@@ -60,9 +61,7 @@ export const auth = betterAuth({
         },
       }
     : {},
-  account: {
-    accountLinking: { enabled: true, trustedProviders: ["google"] },
-  },
+  account: accountOptions,
   session: {
     cookieCache: { enabled: true, maxAge: 5 * 60 },
   },
