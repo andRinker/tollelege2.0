@@ -41,7 +41,9 @@ function Content({ leading, headline, overline, supporting, trailing }: ListItem
   );
 }
 
-const ROW = "flex min-h-14 w-full min-w-0 items-center gap-4 bg-surface-container px-4 py-2 text-left";
+// `self-stretch`: when the actions beside a row are taller than its text, the row grows to meet them
+// instead of floating in the middle of a taller item.
+const ROW = "flex min-h-14 w-full min-w-0 items-center gap-4 self-stretch bg-surface-container px-4 py-2 text-left";
 
 type ListItemProps = ListItemContentProps & {
   href?: AriaLinkProps["href"];

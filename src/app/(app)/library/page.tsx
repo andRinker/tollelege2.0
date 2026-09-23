@@ -1,16 +1,19 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import { Availability } from "@/components/availability";
 import { BookCover } from "@/components/book-cover";
 import { getDb } from "@/db/client";
 import { catalogSummary, listBooks } from "@/server/catalog";
 import { requireTeacher } from "@/server/session";
+import { getRequestSettings } from "@/server/theme";
 import { LinkButton } from "@/ui/components/button";
 import { EmptyState, PageHeader } from "@/ui/components/expressive";
 import { Fab } from "@/ui/components/fab";
 import { CardLink } from "@/ui/components/surfaces";
 import { iconBarcodeScanner, iconChevronLeft, iconChevronRight, iconLibraryAdd, iconSearch } from "@/ui/icons/generated";
-import { parseLibraryFilters } from "./filters";
+import { LIBRARY_VIEW_COOKIE, parseLibraryFilters, parseLibraryView } from "./filters";
 import { LibraryFilters } from "./library-filters";
+import { LibraryList } from "./library-list";
 
 export const metadata: Metadata = { title: "Library" };
 
@@ -29,7 +32,13 @@ export default async function LibraryPage({ searchParams }: PageProps<"/library"
   const params = await searchParams;
   const filters = parseLibraryFilters(params);
   const db = getDb();
-  const [result, summary] = await Promise.all([listBooks(db, teacherId, filters), catalogSummary(db, teacherId)]);
+  const [result, summary, settings, cookieStore] = await Promise.all([
+    listBooks(db, teacherId, filters),
+    catalogSummary(db, teacherId),
+    getRequestSettings(),
+    cookies(),
+  ]);
+  const view = parseLibraryView(cookieStore.get(LIBRARY_VIEW_COOKIE)?.value);
   const isFiltered = Boolean(filters.query || filters.tag || filters.readingLevel || filters.location || filters.availability !== "all");
 
   return (
@@ -70,6 +79,7 @@ export default async function LibraryPage({ searchParams }: PageProps<"/library"
             level={filters.readingLevel}
             bin={filters.location}
             sort={filters.sort}
+            view={view}
             tags={summary.tags}
             readingLevels={summary.readingLevels}
             locations={summary.locations}
@@ -82,6 +92,12 @@ export default async function LibraryPage({ searchParams }: PageProps<"/library"
               title="No books match"
               description={isFiltered ? "Try a different search or clear the filters." : undefined}
               action={isFiltered && <LinkButton variant="tonal" href="/library">Clear filters</LinkButton>}
+            />
+          ) : view === "list" ? (
+            <LibraryList
+              books={result.items}
+              readingLevelSystem={settings.readingLevelSystem}
+              suggestions={{ tags: summary.tags, locations: summary.locations }}
             />
           ) : (
             <ul className="grid grid-cols-2 gap-3 medium:grid-cols-3 expanded:grid-cols-4 large:grid-cols-5 xlarge:grid-cols-6">

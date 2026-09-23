@@ -13,6 +13,7 @@ import {
   deleteBook,
   deleteCopy,
   findBookByIsbn,
+  getBookForEdit,
   listBookIdentities,
   setBookLendable,
   setCopyStatus,
@@ -155,6 +156,17 @@ export async function updateBookAction(bookId: string, input: BookDetailsInput):
     await updateBookDetails(getDb(), teacherId, bookId, parsed.data);
     revalidateLibrary(bookId);
     return ok();
+  } catch (error) {
+    return handleError(error);
+  }
+}
+
+/** A book's full details, fetched when the library list opens its edit form. */
+export async function bookForEditAction(bookId: string): Promise<ActionResult<{ book: Awaited<ReturnType<typeof getBookForEdit>> }>> {
+  const { teacherId } = await requireTeacher();
+  if (!id.safeParse(bookId).success) return fail("That book wasn't found.");
+  try {
+    return ok({ book: await getBookForEdit(getDb(), teacherId, bookId) });
   } catch (error) {
     return handleError(error);
   }

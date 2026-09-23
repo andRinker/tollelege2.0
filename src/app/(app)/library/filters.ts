@@ -18,3 +18,11 @@ export function parseLibraryFilters(params: SearchParams): Required<Pick<BookLis
     page: Number.isInteger(page) && page > 0 ? page : 1,
   };
 }
+
+/** Grid of covers or list of rows. Kept per device in a cookie, like the navigation rail. */
+export type LibraryView = "grid" | "list";
+export const LIBRARY_VIEW_COOKIE = "library-view";
+
+export function parseLibraryView(value: string | undefined): LibraryView {
+  return value === "list" ? "list" : "grid";
+}

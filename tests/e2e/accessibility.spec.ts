@@ -44,4 +44,11 @@ test("app screens have no serious accessibility violations", async ({ page }) =>
     await page.waitForLoadState("networkidle");
     await expectNoSeriousViolations(page, path);
   }
+
+  // The library's list layout: a row's link plus three controls, with a book checked out.
+  await page.goto("/library");
+  await page.getByRole("radio", { name: "List" }).click();
+  await expect(page.getByRole("list", { name: "Books" })).toBeVisible();
+  await page.waitForLoadState("networkidle");
+  await expectNoSeriousViolations(page, "/library as a list");
 });

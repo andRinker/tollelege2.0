@@ -16,7 +16,7 @@ const ICONS = [
   "output", "palette", "person", "person_add", "person_remove", "photo_camera", "print",
   "qr_code_scanner", "refresh", "remove", "report", "restart_alt", "schedule", "school", "search",
   "settings", "shelves", "sort", "star", "swap_vert", "sync", "tune", "undo", "unarchive",
-  "upload_file", "visibility", "visibility_off", "warning", "waving_hand",
+  "upload_file", "visibility", "visibility_off", "warning", "waving_hand", "grid_view", "view_list",
 ];
 
 const root = path.resolve(import.meta.dirname, "..");
