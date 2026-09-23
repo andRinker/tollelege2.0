@@ -7,7 +7,15 @@ test("a teacher signs up, builds a catalog and roster, and checks a book out and
     await page.getByRole("textbox", { name: "Your name" }).fill("Jordan Reyes");
     await page.getByRole("textbox", { name: "School email" }).fill(uniqueEmail("jordan"));
     await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
-    await page.getByRole("button", { name: "Create account" }).click();
+    // Sign-ups are rate-limited per IP in production builds, and earlier specs sign up too.
+    // Wait out a "Too many requests" the way `signUp` in helpers does, rather than fail on it.
+    for (let attempt = 0; attempt < 4; attempt++) {
+      await page.getByRole("button", { name: "Create account" }).click();
+      const limited = page.getByRole("alert").getByText("Too many requests");
+      await Promise.race([page.waitForURL(/\/dashboard$/), limited.waitFor()]);
+      if (!(await limited.isVisible())) break;
+      await page.waitForTimeout(10_000);
+    }
     await expect(page).toHaveURL(/\/dashboard$/);
     await expect(page.getByRole("heading", { name: "Get started" })).toBeVisible();
   });

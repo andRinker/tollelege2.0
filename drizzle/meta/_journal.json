@@ -29,6 +29,13 @@
       "when": 1790161371794,
       "tag": "0003_keep_history_when_deleting",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790194789322,
+      "tag": "0004_admin",
+      "breakpoints": true
     }
   ]
 }

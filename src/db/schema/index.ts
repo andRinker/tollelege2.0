@@ -1,4 +1,5 @@
 // Schema files use relative imports so drizzle-kit can load them without path aliases.
+export * from "./admin";
 export * from "./auth";
 export * from "./catalog";
 export * from "./circulation";
