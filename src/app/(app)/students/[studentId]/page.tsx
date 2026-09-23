@@ -135,7 +135,8 @@ export default async function StudentPage({ params }: PageProps<"/students/[stud
                   }
                   headline={loan.title}
                   supporting={`${formatInstant(loan.checkedOutAt, settings.timeZone, today)} – ${formatInstant(loan.closedAt as Date, settings.timeZone, today)}${loan.closeReason === "lost" ? " · Lost" : ""}`}
-                  href={`/library/${loan.bookId}`}
+                  // A book deleted since stays in the history, but there's no page to open.
+                  href={loan.bookId ? `/library/${loan.bookId}` : undefined}
                 />
               ))}
             </List>

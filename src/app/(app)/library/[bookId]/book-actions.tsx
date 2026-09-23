@@ -153,7 +153,7 @@ export function BookActions({
         isOpen={confirmDelete}
         onOpenChange={setConfirmDelete}
         title="Delete this book?"
-        message={`${book.title} and all its copies will be removed from your library. This can't be undone.`}
+        message={`${book.title} and all its copies will be removed from your library. Students who have read it keep it in their reading history. This can't be undone.`}
         confirmLabel="Delete"
         destructive
         onConfirm={async () => {
@@ -253,7 +253,7 @@ export function CopyMenu({ bookId, copyId, copyNumber, status, isCheckedOut, can
         isOpen={confirmDelete}
         onOpenChange={setConfirmDelete}
         title={`Delete copy ${copyNumber}?`}
-        message="Use this for a copy that was added by mistake. To keep its record, withdraw it instead."
+        message="Students who have read this copy keep it in their reading history. If it might turn up again, withdraw it instead."
         confirmLabel="Delete"
         destructive
         onConfirm={async () => {

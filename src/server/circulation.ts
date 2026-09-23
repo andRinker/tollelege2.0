@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gte, ilike, isNull, notExists, or, type SQL, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ilike, isNotNull, isNull, notExists, or, type SQL, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { Database } from "@/db/client";
 import { books, classes, copies, loans, students, teacherSettings } from "@/db/schema";
@@ -54,7 +54,7 @@ export async function checkOutBook(
       }
 
       const [book] = await tx
-        .select({ id: books.id, title: books.title, coverUrl: books.coverUrl })
+        .select({ id: books.id, title: books.title, authors: books.authors, coverUrl: books.coverUrl })
         .from(books)
         .where(and(eq(books.id, input.bookId), eq(books.teacherId, teacherId)));
       if (!book) throw new NotFoundError("That book isn't in your library.");
@@ -83,7 +83,15 @@ export async function checkOutBook(
 
       const [loan] = await tx
         .insert(loans)
-        .values({ teacherId, copyId: copy.id, studentId: student.id, dueOn: input.dueOn })
+        .values({
+          teacherId,
+          copyId: copy.id,
+          bookId: book.id,
+          bookTitle: book.title,
+          bookAuthors: book.authors,
+          studentId: student.id,
+          dueOn: input.dueOn,
+        })
         .returning({ id: loans.id });
 
       return {
@@ -153,10 +161,17 @@ export async function undoCheckIn(db: Database, teacherId: string, loanId: strin
           eq(loans.teacherId, teacherId),
           eq(loans.closeReason, "returned"),
           gte(loans.closedAt, new Date(now.getTime() - UNDO_WINDOW_MS)),
+          // Returned and then deleted within the undo window: there is no copy to reopen.
+          isNotNull(loans.copyId),
         ),
       )
       .returning({ id: loans.id });
     if (reopened.length === 0) {
+      const [deleted] = await db
+        .select({ id: loans.id })
+        .from(loans)
+        .where(and(eq(loans.id, loanId), eq(loans.teacherId, teacherId), isNull(loans.copyId)));
+      if (deleted) throw new ConflictError("That copy has been deleted, so the return can't be undone.");
       await loanSummary(db, teacherId, loanId);
       throw new ConflictError("That return can't be undone anymore.");
     }
@@ -199,7 +214,9 @@ export async function markLoanLost(db: Database, teacherId: string, loanId: stri
       const existing = await loanSummary(tx, teacherId, loanId);
       throw new ConflictError(`${existing.title} was already checked in.`);
     }
-    await tx.update(copies).set({ status: "lost" }).where(and(eq(copies.id, loan.copyId), eq(copies.teacherId, teacherId)));
+    // `loans_open_has_copy`: the loan was open a moment ago, so its copy is still there.
+    const copyId = loan.copyId as string;
+    await tx.update(copies).set({ status: "lost" }).where(and(eq(copies.id, copyId), eq(copies.teacherId, teacherId)));
     const summary = await loanSummary(tx, teacherId, loanId);
     return { loanId, bookId: summary.bookId, title: summary.title, copyNumber: summary.copyNumber, studentName: summary.studentName };
   });
@@ -275,7 +292,8 @@ export type ActivityItem = {
   loanId: string;
   kind: "checked_out" | "returned" | "lost";
   at: Date;
-  bookId: string;
+  /** Null when the book has since been deleted. */
+  bookId: string | null;
   title: string;
   coverUrl: string | null;
   studentId: string;
@@ -292,13 +310,13 @@ export async function recentActivity(db: Database, teacherId: string, limit = 8)
       closeReason: loans.closeReason,
       bookId: books.id,
       title: books.title,
+      recordedTitle: loans.bookTitle,
       coverUrl: books.coverUrl,
       studentId: students.id,
       studentName,
     })
     .from(loans)
-    .innerJoin(copies, eq(copies.id, loans.copyId))
-    .innerJoin(books, eq(books.id, copies.bookId))
+    .leftJoin(books, eq(books.id, loans.bookId))
     .innerJoin(students, eq(students.id, loans.studentId))
     .where(eq(loans.teacherId, teacherId))
     .orderBy(desc(sql`coalesce(${loans.closedAt}, ${loans.checkedOutAt})`))
@@ -306,7 +324,15 @@ export async function recentActivity(db: Database, teacherId: string, limit = 8)
 
   const events: ActivityItem[] = [];
   for (const row of rows) {
-    const base = { loanId: row.loanId, bookId: row.bookId, title: row.title, coverUrl: row.coverUrl, studentId: row.studentId, studentName: row.studentName };
+    const base = {
+      loanId: row.loanId,
+      bookId: row.bookId,
+      // The book's current title while it exists; the one it went out under once it's gone.
+      title: row.title ?? row.recordedTitle,
+      coverUrl: row.coverUrl,
+      studentId: row.studentId,
+      studentName: row.studentName,
+    };
     if (row.closedAt) events.push({ ...base, kind: row.closeReason === "lost" ? "lost" : "returned", at: row.closedAt });
     events.push({ ...base, kind: "checked_out", at: row.checkedOutAt });
   }

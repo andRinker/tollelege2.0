@@ -213,14 +213,16 @@ export async function deleteBook(db: Database, teacherId: string, bookId: string
   await db.transaction(async (tx) => {
     await requireBook(tx, teacherId, bookId, true);
     await assertNotInShelfLoan(tx, teacherId, { bookId });
-    const [{ loanCount }] = await tx
-      .select({ loanCount: count() })
+    // Past checkouts don't stop a delete: each one keeps the title it went out under, so
+    // students' reading history survives the book. One still out is a book in a student's
+    // hands, though, and has to come back first.
+    const [open] = await tx
+      .select({ id: loans.id })
       .from(loans)
       .innerJoin(copies, eq(copies.id, loans.copyId))
-      .where(eq(copies.bookId, bookId));
-    if (loanCount > 0) {
-      throw new ConflictError("This book has checkout history, so it can't be deleted. Withdraw its copies instead.");
-    }
+      .where(and(eq(copies.bookId, bookId), isNull(loans.closedAt)))
+      .limit(1);
+    if (open) throw new ConflictError("A copy of this book is checked out. Check it in before deleting the book.");
     await tx.delete(books).where(and(eq(books.id, bookId), eq(books.teacherId, teacherId)));
   });
 }
@@ -268,8 +270,8 @@ export async function deleteCopy(db: Database, teacherId: string, copyId: string
   await db.transaction(async (tx) => {
     const copy = await requireCopy(tx, teacherId, copyId);
     await assertNotInShelfLoan(tx, teacherId, { copyId });
-    const [{ loanCount }] = await tx.select({ loanCount: count() }).from(loans).where(eq(loans.copyId, copyId));
-    if (loanCount > 0) throw new ConflictError("This copy has checkout history. Withdraw it instead of deleting it.");
+    const [open] = await tx.select({ id: loans.id }).from(loans).where(and(eq(loans.copyId, copyId), isNull(loans.closedAt))).limit(1);
+    if (open) throw new ConflictError("This copy is checked out. Check it in before deleting it.");
     const [{ copyCount }] = await tx.select({ copyCount: count() }).from(copies).where(eq(copies.bookId, copy.bookId));
     if (copyCount <= 1) throw new ConflictError("This is the book's only copy. Delete the book instead.");
     await tx.delete(copies).where(eq(copies.id, copyId));
@@ -434,7 +436,6 @@ export async function getBookDetail(db: Database, teacherId: string, bookId: str
         studentLastName: students.lastName,
         checkedOutAt: loans.checkedOutAt,
         dueOn: loans.dueOn,
-        loanCount: sql<number>`(select count(*) from ${loans} as l where l.copy_id = ${copies.id})`.mapWith(Number),
       })
       .from(copies)
       .leftJoin(loans, and(eq(loans.copyId, copies.id), isNull(loans.closedAt)))
@@ -444,6 +445,7 @@ export async function getBookDetail(db: Database, teacherId: string, bookId: str
     db
       .select({
         loanId: loans.id,
+        // Null when that copy has since been deleted; the checkout still belongs to the book.
         copyNumber: copies.copyNumber,
         studentId: students.id,
         studentFirstName: students.firstName,
@@ -454,9 +456,9 @@ export async function getBookDetail(db: Database, teacherId: string, bookId: str
         closeReason: loans.closeReason,
       })
       .from(loans)
-      .innerJoin(copies, eq(copies.id, loans.copyId))
+      .leftJoin(copies, eq(copies.id, loans.copyId))
       .innerJoin(students, eq(students.id, loans.studentId))
-      .where(and(eq(copies.bookId, bookId), eq(loans.teacherId, teacherId)))
+      .where(and(eq(loans.bookId, bookId), eq(loans.teacherId, teacherId)))
       .orderBy(desc(loans.checkedOutAt))
       .limit(50),
   ]);

@@ -283,7 +283,9 @@ export async function getStudentDetail(db: Database, teacherId: string, studentI
       loanId: loans.id,
       bookId: books.id,
       title: books.title,
+      recordedTitle: loans.bookTitle,
       authors: books.authors,
+      recordedAuthors: loans.bookAuthors,
       coverUrl: books.coverUrl,
       copyNumber: copies.copyNumber,
       checkedOutAt: loans.checkedOutAt,
@@ -292,15 +294,25 @@ export async function getStudentDetail(db: Database, teacherId: string, studentI
       closeReason: loans.closeReason,
     })
     .from(loans)
-    .innerJoin(copies, eq(copies.id, loans.copyId))
-    .innerJoin(books, eq(books.id, copies.bookId))
+    // Left joins: a returned book may since have been deleted, and what the student read
+    // stays on their record under the title it went out with.
+    .leftJoin(copies, eq(copies.id, loans.copyId))
+    .leftJoin(books, eq(books.id, loans.bookId))
     .where(and(eq(loans.studentId, studentId), eq(loans.teacherId, teacherId)))
     .orderBy(desc(loans.checkedOutAt));
 
+  const shaped = loanRows.map(({ recordedTitle, recordedAuthors, ...loan }) => ({
+    ...loan,
+    title: loan.title ?? recordedTitle,
+    authors: loan.authors ?? recordedAuthors,
+  }));
   return {
     student,
-    current: loanRows.filter((loan) => loan.closedAt === null),
-    history: loanRows.filter((loan) => loan.closedAt !== null),
+    // An open checkout always has its copy and book: neither can be deleted while it's out.
+    current: shaped
+      .filter((loan) => loan.closedAt === null)
+      .map((loan) => ({ ...loan, bookId: loan.bookId as string, copyNumber: loan.copyNumber as number })),
+    history: shaped.filter((loan) => loan.closedAt !== null),
   };
 }
 

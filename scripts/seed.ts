@@ -120,6 +120,8 @@ async function main() {
   const studentIds = (await db.select({ id: students.id }).from(students).where(eq(students.teacherId, teacherId))).map((row) => row.id);
 
   const copyIds: string[] = [];
+  /** What each checkout records about its book, looked up by the copy it took. */
+  const bookOf = new Map<string, { bookId: string; bookTitle: string; bookAuthors: string[] }>();
   for (const [isbn13, title, authors, year, pages, level, tags, copyCount] of BOOKS) {
     if (isbn13 && !isValidIsbn13(isbn13)) throw new Error(`Seed ISBN for ${title} is invalid: ${isbn13}`);
     const created = await createBook(
@@ -144,6 +146,7 @@ async function main() {
       copyCount,
     );
     copyIds.push(...created.copyIds);
+    for (const copyId of created.copyIds) bookOf.set(copyId, { bookId: created.bookId, bookTitle: title, bookAuthors: authors });
   }
 
   // Loans. Checkout times are mid-morning in the teacher's time zone (15:00 UTC is 10 AM in Chicago).
@@ -158,7 +161,7 @@ async function main() {
     }
   };
 
-  const history: Array<typeof loans.$inferInsert> = [];
+  const history: Array<Omit<typeof loans.$inferInsert, "bookTitle"> & { copyId: string }> = [];
   // Returned books from the last two months.
   for (let i = 0; i < 36; i++) {
     const daysAgo = 8 + Math.floor(rand() * 55);
@@ -203,7 +206,7 @@ async function main() {
   const lostCopy = shuffledCopies.pop()!;
   history.push({ teacherId, copyId: lostCopy, studentId: pick(studentIds), checkedOutAt: at(40), dueOn: addDays(today, -26), closedAt: at(3), closeReason: "lost" });
 
-  await db.insert(loans).values(history);
+  await db.insert(loans).values(history.map((loan) => ({ ...loan, ...bookOf.get(loan.copyId)! })));
   await db.update(copies).set({ status: "lost" }).where(eq(copies.id, lostCopy));
 
   console.info(`Seeded ${kind === "pg" ? "DATABASE_URL" : "local PGlite"}:`);

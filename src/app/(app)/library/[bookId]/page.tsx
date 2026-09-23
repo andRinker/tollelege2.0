@@ -183,7 +183,7 @@ export default async function BookPage({ params }: PageProps<"/library/[bookId]"
                           copyNumber={copy.copyNumber}
                           status={copy.status}
                           isCheckedOut={Boolean(copy.loanId)}
-                          canDelete={copy.loanCount === 0 && copies.length > 1}
+                          canDelete={copies.length > 1}
                         />
                       )
                     }
@@ -214,9 +214,11 @@ export default async function BookPage({ params }: PageProps<"/library/[bookId]"
                 {history.map((loan) => {
                   const name = `${loan.studentFirstName} ${loan.studentLastName}`.trim();
                   const out = formatInstant(loan.checkedOutAt, settings.timeZone, today);
+                  // A copy deleted since keeps its checkouts here, just without a number to show.
+                  const copy = loan.copyNumber === null ? "" : ` · Copy ${loan.copyNumber}`;
                   const supporting = loan.closedAt
-                    ? `${out} – ${formatInstant(loan.closedAt, settings.timeZone, today)}${loan.closeReason === "lost" ? " · Lost" : ""} · Copy ${loan.copyNumber}`
-                    : `Checked out ${out}${loan.dueOn ? ` · ${describeDueDate(loan.dueOn, today)}` : ""} · Copy ${loan.copyNumber}`;
+                    ? `${out} – ${formatInstant(loan.closedAt, settings.timeZone, today)}${loan.closeReason === "lost" ? " · Lost" : ""}${copy}`
+                    : `Checked out ${out}${loan.dueOn ? ` · ${describeDueDate(loan.dueOn, today)}` : ""}${copy}`;
                   return (
                     <ListItem
                       key={loan.loanId}

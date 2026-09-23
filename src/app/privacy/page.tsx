@@ -157,7 +157,8 @@ export default function PrivacyPage() {
         <Section title="Keeping and deleting data">
           <p>
             Your data stays until you delete it. Deleting a book, a class, or a student removes it, and deleting a student also
-            removes their borrowing history.
+            removes their borrowing history. Deleting a book keeps its title and author in the checkouts of students who read it,
+            so their reading history stays whole.
           </p>
           <p>
             To delete your whole account and everything in it, or to ask a question about your data,{" "}
