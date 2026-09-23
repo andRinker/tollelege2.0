@@ -43,7 +43,7 @@ npx vercel link && npx vercel env pull .env.local
 
 ## Rules
 
-- **Tenant isolation.** Teacher data is always filtered by `teacher_id`, and the teacher ID comes only from `requireTeacher()` in `src/server/session.ts` — never from client input. Data-access functions live in `src/server/*` with the signature `(db, teacherId, input)`. The lending library is the one place two teachers meet, and it goes through `shelf_loans` — see below. Nothing else crosses.
+- **Tenant isolation.** Teacher data is always filtered by `teacher_id`, and the teacher ID comes only from `requireTeacher()` in `src/server/session.ts` — never from client input. Data-access functions live in `src/server/*` with the signature `(db, teacherId, input)`. The lending library is the one place two teachers meet, and it goes through `shelf_loans` — see below. The admin is the one role that reaches across, and only through `src/server/admin.ts` behind `requireAdmin()` — see below. Nothing else crosses.
 - Tables holding teacher data need a `teacher_id` column, a unique `(id, teacher_id)` constraint, and composite foreign keys `(parent_id, teacher_id)` to their parents.
 - `src/proxy.ts` only redirects optimistically on cookie presence. Every page, layout, and server action must call `requireTeacher()`.
 - Schema files in `src/db/schema/` use relative imports, because drizzle-kit loads them without path aliases.
@@ -96,6 +96,22 @@ Consequences, all deliberate:
 - A shelf photo from the phone still **proposes**; the teacher confirms it in the browser exactly as always. A device with no account does not get to add books it merely thinks it recognised.
 - `addBookByScan` in `src/server/quick-add.ts` is the one path a scanned barcode takes, whether it came from the USB wedge, the laptop camera or a phone. Scanning the same shelf two ways must give the same library.
 - Anything shown about when a pairing expires is formatted **on the server** in the teacher's time zone. Formatting a time in the browser renders one thing on the server and another after hydration.
+
+## Admin
+
+`ADMIN_EMAILS` (comma-separated) names the administrators, and an address only counts when it is **verified**. Password sign-ups here are never verified, so without that check anyone could register an admin's address first and walk in as admin; Google sign-ins are verified by Google. `isAdmin` lives in `src/lib/admin-access.ts`, free of server imports, because the auth config needs it too.
+
+`/admin` lists every account with counts, shows system health, and keeps the audit trail. `/admin/teachers/[id]` is a read-only look inside one account, plus Sign out everywhere and Delete. A non-admin gets a 404, not a 403, so the area doesn't announce itself.
+
+**Editing someone's library is done by acting as them, never by admin-only write paths.** `src/lib/act-as.ts` is a two-endpoint Better Auth plugin: start swaps the admin's session for a fresh one in the teacher's account, marked `session.impersonated_by`, with the admin's own token kept in a signed `admin_session` cookie; stop puts it back. While it lasts, `requireTeacher()` returns the teacher, so every existing screen works for them and tenant isolation holds unchanged. Better Auth's own admin plugin does the same but brings a role column and a dozen more endpoints, which is why it isn't used.
+
+Consequences, all deliberate:
+
+- Every look inside an account, every start and stop of acting, every sign-out and every deletion goes in `admin_audit`. It has no foreign keys and copies emails in, so a record of deleting an account outlives the account. The edits made while acting are the teacher's, like any other edit.
+- Acting lasts at most an hour, can't target another admin or yourself, and hides `/admin` while it lasts. Stopping revokes any phone paired during it, which would otherwise keep adding to their library until midnight.
+- While acting, the layout doesn't save the browser's time zone into the teacher's settings: it's the admin's browser, not theirs. Sign out is replaced by "Back to your account", since signing out would end the teacher's own phone pairings.
+- Deleting an account is refused while a book is lent to or from another teacher, and for the admin's own account. It needs the account's email typed to confirm.
+- `/privacy` says what an admin can see and do, and must keep matching.
 
 ## Lending library
 

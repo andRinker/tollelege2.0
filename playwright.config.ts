@@ -37,6 +37,8 @@ export default defineConfig({
       ISBN_LOOKUP_FIXTURES: "1",
       // A canned shelf, so the review screen can be exercised without a Gemini key or a photo.
       SHELF_SCAN_FIXTURES: "1",
+      // An admin address nobody can verify here, so the suite checks it can't be claimed by signing up with it.
+      ADMIN_EMAILS: "squatted-admin@example.test",
       BETTER_AUTH_URL: E2E_BASE_URL,
       BETTER_AUTH_SECRET: "e2e-only-secret-not-used-anywhere-else-0123456789",
       GOOGLE_CLIENT_ID: "",

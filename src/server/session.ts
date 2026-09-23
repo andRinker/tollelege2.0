@@ -28,3 +28,13 @@ export async function requireTeacher(): Promise<Teacher> {
     image: session.user.image ?? null,
   };
 }
+
+/**
+ * When an admin is working inside this account through "Act as": who, and until when.
+ * Null for an ordinary session. See `src/lib/act-as.ts`.
+ */
+export async function getActingAdmin(): Promise<{ adminId: string; expiresAt: Date } | null> {
+  const session = await getSession();
+  const adminId = (session?.session as { impersonatedBy?: string | null } | undefined)?.impersonatedBy;
+  return session && adminId ? { adminId, expiresAt: new Date(session.session.expiresAt) } : null;
+}

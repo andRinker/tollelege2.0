@@ -4,6 +4,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
 import { getDb } from "@/db/client";
 import * as schema from "@/db/schema";
+import { actAs } from "@/lib/act-as";
 import { APP_NAME } from "@/lib/brand";
 import { sendPasswordResetEmail } from "@/lib/email";
 
@@ -66,7 +67,7 @@ export const auth = betterAuth({
     cookieCache: { enabled: true, maxAge: 5 * 60 },
   },
   // Must stay last: it copies Set-Cookie headers into Next.js server actions.
-  plugins: [nextCookies()],
+  plugins: [actAs(), nextCookies()],
 });
 
 export type AuthSession = typeof auth.$Infer.Session;

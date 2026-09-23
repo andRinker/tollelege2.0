@@ -85,6 +85,13 @@ export default function PrivacyPage() {
             them, whatever else you share.
           </p>
           <p>
+            The one exception is the site&rsquo;s administrator, who looks after {APP_NAME} for your school. An
+            administrator can see every account&rsquo;s library, classes, students and checkouts, and can work inside an
+            account to set up or fix a library on a teacher&rsquo;s behalf, for up to an hour at a time. They can also sign
+            an account out everywhere or delete it. Each of these is recorded in a log with who did it and when, and that
+            record is kept even after an account is deleted.
+          </p>
+          <p>
             Your book catalog is private too, until you connect with another teacher. Connecting takes an invitation from
             one of you and acceptance by the other, and either of you can undo it at any time. While you are connected,
             that teacher can see the titles you offer for lending &mdash; the title, authors, cover, reading level, tags,
@@ -149,16 +156,19 @@ export default function PrivacyPage() {
 
         <Section title="Cookies">
           <p>
-            {APP_NAME} uses a sign-in cookie to keep you signed in, and two preference cookies: your time zone, so due dates are
-            right, and whether the navigation menu is expanded. There are no tracking or advertising cookies.
+            {APP_NAME} uses a sign-in cookie to keep you signed in, and three preference cookies: your time zone, so due
+            dates are right, whether the navigation menu is expanded, and whether your library shows as a grid or a list.
+            While an administrator is working inside someone&rsquo;s account, one more cookie holds the administrator&rsquo;s
+            own sign-in, so they can return to it. There are no tracking or advertising cookies.
           </p>
         </Section>
 
         <Section title="Keeping and deleting data">
           <p>
             Your data stays until you delete it. Deleting a book, a class, or a student removes it, and deleting a student also
-            removes their borrowing history. Deleting a book keeps its title and author in the checkouts of students who read it,
-            so their reading history stays whole.
+            removes their borrowing history. Deleting a book keeps its title and author in the checkouts of students who
+            read it, so their reading history stays whole. When an administrator deletes an account, everything in it is
+            deleted with it; only the log entry recording the deletion, with the account&rsquo;s email address, is kept.
           </p>
           <p>
             To delete your whole account and everything in it, or to ask a question about your data,{" "}
