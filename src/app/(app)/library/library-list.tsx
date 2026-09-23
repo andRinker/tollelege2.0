@@ -100,7 +100,7 @@ function LibraryRow({ book, readingLevelSystem, suggestions }: { book: BookListI
           <>
             {/* Labelled where there's room; icons with the same names on a phone. Each set is a
                 group named for the book, so a screen reader hears which "Delete" this is. */}
-            <div role="group" aria-label={book.title} className="flex flex-col items-stretch gap-1 py-2 max-medium:hidden [&>*]:justify-start">
+            <div role="group" aria-label={book.title} className="flex w-52 flex-col items-stretch gap-1 py-2 max-medium:hidden [&>*]:justify-start">
               <Button variant="tonal" size="xs" icon={iconEdit} isPending={loadingEdit} onPress={() => void edit()}>
                 Edit details
               </Button>
