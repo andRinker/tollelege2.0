@@ -36,6 +36,13 @@
       "when": 1790194789322,
       "tag": "0004_admin",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790205552349,
+      "tag": "0005_admin_created_account",
+      "breakpoints": true
     }
   ]
 }

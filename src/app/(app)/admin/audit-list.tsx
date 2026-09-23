@@ -4,6 +4,7 @@ import { formatRecentInstant } from "@/lib/dates";
 import { List, ListItem } from "@/ui/components/list";
 
 const DESCRIBE: Record<AdminAction, string> = {
+  created_account: "Created an account for",
   viewed_account: "Looked inside",
   started_acting: "Started acting as",
   stopped_acting: "Stopped acting as",

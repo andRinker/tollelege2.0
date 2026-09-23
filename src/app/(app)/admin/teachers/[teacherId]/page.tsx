@@ -69,6 +69,8 @@ export default async function AdminAccountPage({ params }: PageProps<"/admin/tea
           {isProtected
             ? "This is an admin account, so it can't be acted as or deleted from here."
             : "This view is read-only. To add or change anything, act as them: you'll use the same screens they do, for up to an hour."}{" "}
+          {!account.hasSignedIn &&
+            "They haven't signed in yet. The first time they sign in with Google using this email, everything here is theirs. "}
           Opening this page was recorded in the admin activity log.
         </p>
       </div>
