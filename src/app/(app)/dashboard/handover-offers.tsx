@@ -8,7 +8,7 @@ import { useSnackbar } from "@/ui/components/snackbar";
 import { iconMoveItem } from "@/ui/icons/generated";
 import { acceptHandoverAction, declineHandoverAction } from "../settings/handover-actions";
 
-type Offer = { id: string; fromName: string; classNames: string[]; books: number };
+type Offer = { id: string; fromName: string; classNames: string[]; books: number; copies: number };
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
@@ -16,7 +16,10 @@ function describe(offer: Offer) {
   const classes = offer.classNames.length
     ? `${new Intl.ListFormat("en", { type: "conjunction" }).format(offer.classNames)}, with ${offer.classNames.length === 1 ? "its" : "their"} students and reading history`
     : null;
-  return [classes, offer.books ? plural(offer.books, "book") : null].filter(Boolean).join(", and ");
+  const books = offer.books
+    ? plural(offer.books, "book") + (offer.copies > offer.books ? ` (${plural(offer.copies, "copy", "copies")})` : "")
+    : null;
+  return [classes, books].filter(Boolean).join(", and ");
 }
 
 /** Classes and books another teacher wants to hand to this one. */
@@ -62,7 +65,8 @@ function OfferCard({ offer }: { offer: Offer }) {
     <div className="flex flex-col gap-3 rounded-xl bg-tertiary-container p-4 text-on-tertiary-container medium:flex-row medium:items-center medium:p-5">
       <p className="grow text-body-lg">
         <strong className="font-medium">{offer.fromName}</strong>
-        {` wants to hand you ${describe(offer)}. They'll stay on as a co-teacher of any class, and you can remove them.`}
+        {` wants to hand you ${describe(offer)}.`}
+        {offer.classNames.length > 0 && " They'll stay on as a co-teacher, and you can remove them."}
       </p>
       <div className="flex shrink-0 gap-2 self-end medium:self-auto">
         <Button variant="text" onPress={() => setDeclining(true)}>

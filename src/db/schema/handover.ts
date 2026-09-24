@@ -23,7 +23,10 @@ export const handovers = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     classIds: uuid("class_ids").array().notNull().default(sql`'{}'::uuid[]`),
+    /** Whole titles, with every copy. */
     bookIds: uuid("book_ids").array().notNull().default(sql`'{}'::uuid[]`),
+    /** Single copies from titles the sender keeps, when they give only some of a title's copies. */
+    copyIds: uuid("copy_ids").array().notNull().default(sql`'{}'::uuid[]`),
     status: text("status", { enum: handoverStatuses }).notNull().default("pending"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     respondedAt: timestamp("responded_at", { withTimezone: true }),
@@ -34,6 +37,6 @@ export const handovers = pgTable(
     index("handovers_to_idx").on(t.toTeacherId, t.status),
     check("handovers_distinct_teachers", sql`${t.fromTeacherId} <> ${t.toTeacherId}`),
     check("handovers_status_check", sql.raw(`status in ${sqlList(handoverStatuses)}`)),
-    check("handovers_not_empty", sql`cardinality(${t.classIds}) + cardinality(${t.bookIds}) > 0`),
+    check("handovers_not_empty", sql`cardinality(${t.classIds}) + cardinality(${t.bookIds}) + cardinality(${t.copyIds}) > 0`),
   ],
 );
