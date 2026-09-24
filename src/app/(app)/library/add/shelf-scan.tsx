@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { BookCover } from "@/components/book-cover";
 import { preparePhoto } from "@/components/prepare-photo";
+import { ShelfCropper } from "@/components/shelf-cropper";
+import type { CropBox } from "@/lib/crop";
 import { describeGap } from "@/lib/shelf-gaps";
 import type { MatchCandidate, ShelfScan, ShelfSlot, ShelfTally } from "@/server/shelf-scan";
 import { cx } from "@/ui/cx";
@@ -36,8 +38,10 @@ type Row = {
 
 type State =
   | { kind: "idle" }
+  /** A photo picked, waiting to be cropped to one shelf (or sent whole). */
+  | { kind: "cropping"; file: File; count: string }
   | { kind: "reading" }
-  | { kind: "review"; rows: Row[]; tally: ShelfTally }
+  | { kind: "review"; rows: Row[]; tally: ShelfTally; otherShelf: number }
   | { kind: "adding"; done: number; total: number }
   | { kind: "error"; message: string };
 
@@ -64,7 +68,7 @@ const CONFIDENCE_LABEL: Record<MatchCandidate["confidence"], { text: string; cla
  * order so the list reads like the shelf: the row for a spine nobody could read sits
  * physically between its neighbours, which is most of the explanation it needs.
  */
-function reviewFrom(scan: Pick<ShelfScan, "slots"> & Partial<Pick<ShelfScan, "tally">>): State {
+function reviewFrom(scan: Pick<ShelfScan, "slots"> & Partial<Pick<ShelfScan, "tally" | "otherShelf">>): State {
   // A shelf a phone sent before copies and counts existed has neither; read it as one copy
   // a spine, with no count to check against.
   const slots = scan.slots.map((slot) => ({ ...slot, copies: slot.copies ?? 1, secondLook: slot.secondLook ?? false }));
@@ -72,6 +76,7 @@ function reviewFrom(scan: Pick<ShelfScan, "slots"> & Partial<Pick<ShelfScan, "ta
   return {
     kind: "review",
     tally: scan.tally ?? { expected: null, seen, missing: 0, foundOnSecondLook: 0 },
+    otherShelf: scan.otherShelf ?? 0,
     rows: slots.map((slot) => ({
       slot,
       chosen: 0,
@@ -101,7 +106,7 @@ type ShelfScanDialogProps = {
    * Slots that arrived from a paired phone, to review instead of taking a photo here.
    * The caller remounts on each new shelf, so this is only ever read once.
    */
-  incoming?: Pick<ShelfScan, "slots"> & Partial<Pick<ShelfScan, "tally">>;
+  incoming?: Pick<ShelfScan, "slots"> & Partial<Pick<ShelfScan, "tally" | "otherShelf">>;
   /** The gap waiting for the next scan, if any. Owned above, since scans arrive there. */
   armedPosition: number | null;
   onArm: (position: number | null) => void;
@@ -128,10 +133,10 @@ export function ShelfScanDialog({
     setState({ kind: "idle" });
   }
 
-  async function scan(file: File, count: string) {
+  async function scan(file: File, count: string, crop: CropBox | null) {
     setState({ kind: "reading" });
     const data = new FormData();
-    data.set("photo", await preparePhoto(file));
+    data.set("photo", await preparePhoto(file, crop));
     if (count.trim()) data.set("expected", count.trim());
     const result = await scanShelfAction(data);
 
@@ -220,7 +225,11 @@ export function ShelfScanDialog({
       }
     >
       <div className="flex min-h-0 flex-col gap-4">
-        {state.kind === "idle" && <PhotoPicker onPick={(file, count) => void scan(file, count)} />}
+        {state.kind === "idle" && <PhotoPicker onPick={(file, count) => setState({ kind: "cropping", file, count })} />}
+
+        {state.kind === "cropping" && (
+          <ShelfCropper file={state.file} onUse={(crop) => void scan(state.file, state.count, crop)} />
+        )}
 
         {state.kind === "reading" && (
           <div className="grid place-items-center gap-3 py-12">
@@ -250,6 +259,7 @@ export function ShelfScanDialog({
           <ReviewList
             rows={state.rows}
             tally={state.tally}
+            otherShelf={state.otherShelf}
             onChange={(rows) => setState({ ...state, rows })}
             armedPosition={armedPosition}
             onArm={onArm}
@@ -318,6 +328,7 @@ function describeTally(tally: ShelfTally): string | null {
 function ReviewList({
   rows,
   tally,
+  otherShelf,
   onChange,
   armedPosition,
   onArm,
@@ -327,6 +338,7 @@ function ReviewList({
 }: {
   rows: Row[];
   tally: ShelfTally;
+  otherShelf: number;
   onChange: (rows: Row[]) => void;
   armedPosition: number | null;
   onArm: (position: number | null) => void;
@@ -506,6 +518,12 @@ function ReviewList({
           "Untick anything that looks wrong."
         )}
       </p>
+
+      {otherShelf > 0 && (
+        <p className="text-body-sm text-on-surface-variant">
+          {`Left out ${otherShelf} ${otherShelf === 1 ? "spine" : "spines"} from another shelf in the photo. If that was the shelf you meant, retake it and crop to just that one.`}
+        </p>
+      )}
 
       <ul className="flex flex-col gap-1">
         {rows.map((row, index) => {

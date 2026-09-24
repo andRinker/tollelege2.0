@@ -1,7 +1,14 @@
 import { getDb } from "@/db/client";
 import { listBookIdentities } from "@/server/catalog";
 import { assertWithinLimits, recordScanEvent } from "@/server/scan-pairing";
-import { checkPhoto, parseShelfCount, scanShelf, shelfScanConfigured, ShelfScanUnavailableError } from "@/server/shelf-scan";
+import {
+  checkPhoto,
+  describeShelfFailure,
+  parseShelfCount,
+  scanShelf,
+  shelfScanConfigured,
+  ShelfScanUnavailableError,
+} from "@/server/shelf-scan";
 import { authorizePhone, problem } from "../pairing-request";
 
 export const runtime = "nodejs";
@@ -37,11 +44,11 @@ export async function POST(request: Request) {
     );
     await recordScanEvent(getDb(), pairing, "shelf_proposed", scan);
     const found = scan.slots.length - scan.needsAttention;
-    return Response.json({ found, needsAttention: scan.needsAttention, tally: scan.tally });
+    return Response.json({ found, needsAttention: scan.needsAttention, tally: scan.tally, otherShelf: scan.otherShelf });
   } catch (error) {
     if (error instanceof ShelfScanUnavailableError) {
-      console.warn(`Shelf scan unavailable: ${error.message}`);
-      return Response.json({ message: "Couldn't read that photo. Try again in a moment." }, { status: 503 });
+      console.warn(`Shelf scan unavailable (${error.reason}): ${error.message}`);
+      return Response.json({ message: describeShelfFailure(error.reason) }, { status: 503 });
     }
     return problem(error);
   }

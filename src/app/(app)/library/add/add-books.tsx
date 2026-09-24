@@ -96,7 +96,7 @@ export function AddBooks({ readingLevelSystem, suggestions, pairedPhones, scanCu
   const [manual, setManual] = useState<BookFormValue | null>(null);
   const [shelfOpen, setShelfOpen] = useState(false);
   const [phoneScanning, setPhoneScanning] = useState(false);
-  const [incomingShelf, setIncomingShelf] = useState<{ slots: ShelfSlot[]; tally?: ShelfTally; at: number } | null>(null);
+  const [incomingShelf, setIncomingShelf] = useState<{ slots: ShelfSlot[]; tally?: ShelfTally; otherShelf?: number; at: number } | null>(null);
   /**
    * A gap in the shelf review waiting for the next scan. It lives here rather than in the
    * dialog because this is where scans arrive — from the phone, the USB wedge or the
@@ -180,7 +180,7 @@ export function AddBooks({ readingLevelSystem, suggestions, pairedPhones, scanCu
         // A new shelf resets everything the last one was waiting on.
         setArmedGap(null);
         setGapFills({});
-        setIncomingShelf({ slots: event.payload.slots, tally: event.payload.tally, at: event.seq });
+        setIncomingShelf({ slots: event.payload.slots, tally: event.payload.tally, otherShelf: event.payload.otherShelf, at: event.seq });
         setShelfOpen(true);
       }
     }

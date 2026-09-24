@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { matchSpine } from "@/server/shelf-scan/match";
 import { findOwned } from "@/server/shelf-scan/owned";
 import { mergeLooks, scanShelf } from "@/server/shelf-scan";
-import { readSpines } from "@/server/shelf-scan/vision";
+import { readShelf, readSpines, ShelfScanUnavailableError } from "@/server/shelf-scan/vision";
 
 type Volume = { title: string; authors: string[]; isbn13: string };
 
@@ -150,6 +150,33 @@ describe("reading spines from a photo", () => {
     ]);
   });
 
+  it("reads one shelf, and counts the spines it left out from others in the frame", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    let prompt = "";
+    const fetchFn = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      prompt = JSON.parse(String(init?.body)).contents[0].parts[0].text;
+      const answer = { spines: [{ title: "Holes", author: "Louis Sachar" }], otherShelfSpines: 4 };
+      return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify(answer) }] } }] });
+    }) as typeof fetch;
+    const reading = await readShelf(image, fetchFn, { expected: 30 });
+    expect(reading).toEqual({ sightings: [{ reading: { title: "Holes", author: "Louis Sachar" }, fragment: null, copies: 1 }], otherShelf: 4 });
+    expect(prompt).toContain("Read only the");
+    // The count only settles which shelf was meant, and says so.
+    expect(prompt).toContain("counted about 30 books on theirs");
+    expect(prompt).toContain("Never add or leave out spines to match it.");
+  });
+
+  it("leaves the count out of the first reading when there isn't one", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    let prompt = "";
+    const fetchFn = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      prompt = JSON.parse(String(init?.body)).contents[0].parts[0].text;
+      return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ spines: [] }) }] } }] });
+    }) as typeof fetch;
+    expect(await readShelf(image, fetchFn)).toEqual({ sightings: [], otherShelf: 0 });
+    expect(prompt).not.toContain("counted");
+  });
+
   it("refuses to run without a key rather than failing silently", async () => {
     vi.stubEnv("GEMINI_API_KEY", "");
     await expect(readSpines(image, geminiReturning([]))).rejects.toThrow(/GEMINI_API_KEY/);
@@ -286,5 +313,93 @@ describe("checking a shelf against the teacher's count", () => {
       expect(scan.slots).toHaveLength(1);
       expect(scan.tally).toEqual({ expected: 4, seen: 1, missing: 3, foundOnSecondLook: 0 });
     });
+  });
+});
+
+describe("when the reader fails", () => {
+  afterEach(() => vi.unstubAllEnvs());
+  const image = { data: new ArrayBuffer(8), mimeType: "image/jpeg" };
+  const answer = (candidate: object) => Response.json({ candidates: [candidate] });
+  const ok = (text: string) => answer({ finishReason: "STOP", content: { parts: [{ text }] } });
+
+  /** Answers each call with the next response in line. */
+  function responses(...queue: (Response | Error)[]) {
+    let calls = 0;
+    const fetchFn = (async () => {
+      const next = queue[calls++];
+      if (next instanceof Error) throw next;
+      return next;
+    }) as unknown as typeof fetch;
+    return { fetchFn, calls: () => calls };
+  }
+
+  async function failure(fetchFn: typeof fetch) {
+    try {
+      await readShelf(image, fetchFn);
+    } catch (error) {
+      return error as ShelfScanUnavailableError;
+    }
+    throw new Error("expected the reading to fail");
+  }
+
+  it("tries once more when the service is busy, and succeeds", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    const { fetchFn, calls } = responses(
+      new Response('{"error":{"message":"The model is overloaded."}}', { status: 503 }),
+      ok(JSON.stringify({ spines: [{ title: "Holes" }] })),
+    );
+    expect((await readShelf(image, fetchFn)).sightings).toHaveLength(1);
+    expect(calls()).toBe(2);
+  });
+
+  it("says a busy service is busy after the retry, and keeps Google's reason for the log", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    const busy = () => new Response('{"error":{"message":"Resource has been exhausted (e.g. check quota)."}}', { status: 429 });
+    const error = await failure(responses(busy(), busy()).fetchFn);
+    expect(error.reason).toBe("busy");
+    expect(error.message).toContain("HTTP 429");
+    expect(error.message).toContain("check quota");
+  });
+
+  it("doesn't retry a refused request, which would only be refused again", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    const { fetchFn, calls } = responses(new Response('{"error":{"message":"API key not valid."}}', { status: 400 }));
+    const error = await failure(fetchFn);
+    expect(error.reason).toBe("refused");
+    expect(error.message).toContain("API key not valid");
+    expect(calls()).toBe(1);
+  });
+
+  it("calls a timeout a timeout", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    const timeout = Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+    expect((await failure(responses(timeout).fetchFn)).reason).toBe("timeout");
+  });
+
+  it("won't start a reading there's no time left to finish", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    const { fetchFn, calls } = responses(ok("{}"));
+    await expect(readShelf(image, fetchFn, { deadline: Date.now() + 1000 })).rejects.toMatchObject({ reason: "timeout" });
+    expect(calls()).toBe(0);
+  });
+
+  it("reads an answer that arrives in several parts, skipping the model's thoughts", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    const { fetchFn } = responses(
+      answer({
+        finishReason: "STOP",
+        content: { parts: [{ text: "planning…", thought: true }, { text: '{"spines":[{"title":"Ho' }, { text: 'les"}]}' }] },
+      }),
+    );
+    expect((await readShelf(image, fetchFn)).sightings).toEqual([{ reading: { title: "Holes", author: null }, fragment: null, copies: 1 }]);
+  });
+
+  it("reports an answer cut short or withheld, rather than an empty shelf", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    const cut = await failure(responses(answer({ finishReason: "MAX_TOKENS", content: { parts: [{ text: '{"spines":[{"ti' }] } })).fetchFn);
+    expect(cut).toMatchObject({ reason: "unreadable" });
+    expect(cut.message).toContain("MAX_TOKENS");
+    const withheld = await failure(responses(answer({ finishReason: "SAFETY" })).fetchFn);
+    expect(withheld.message).toContain("SAFETY");
   });
 });

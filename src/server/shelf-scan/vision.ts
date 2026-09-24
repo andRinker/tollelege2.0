@@ -26,20 +26,44 @@ export type SpineSighting = {
   copies: number;
 };
 
-export class ShelfScanUnavailableError extends Error {}
+/**
+ * Why a reading failed, so a teacher can be told something they can act on and the logs say
+ * which it was. They used to share one message, which made three failures in a row impossible
+ * to tell apart: a slow answer, a busy service and a refused request call for different fixes.
+ */
+export type ShelfScanFailure = "timeout" | "busy" | "refused" | "unreadable" | "unconfigured";
+
+export class ShelfScanUnavailableError extends Error {
+  constructor(
+    message: string,
+    readonly reason: ShelfScanFailure = "busy",
+  ) {
+    super(message);
+    this.name = "ShelfScanUnavailableError";
+  }
+}
 
 const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta";
 // An alias rather than a pinned version, so the model can improve without a code change.
 // Numbered previews come and go, and some of them answer on a different API entirely.
 const DEFAULT_MODEL = "gemini-flash-latest";
-const TIMEOUT_MS = 30_000;
+/** The longest one reading may take. A dense shelf is a long answer, and some models think first. */
+const TIMEOUT_MS = 45_000;
+/** Below this, there's no point starting a reading: it couldn't finish in time. */
+const MIN_READING_MS = 5_000;
+/** Statuses that mean "not now" rather than "not this": worth one quick retry. */
+const RETRYABLE = new Set([429, 500, 502, 503, 504]);
 /** A shelf photo holding more than this is almost certainly a whole bookcase, shot too far away. */
 const MAX_READINGS = 60;
 
 const PROMPT = [
   "This photo shows books on a shelf, viewed from the side so mostly spines are visible.",
   "",
-  "List every spine you can see, in order from left to right. Return a JSON array of objects.",
+  "The photo is meant to show ONE shelf: the row of books it is centred on, which fills most of the",
+  "frame. Parts of the shelves above or below may creep in at the top or bottom edge. Read only the",
+  "one shelf. Do not list spines from any other shelf; count them instead, in \"otherShelfSpines\".",
+  "",
+  'List every spine on that shelf, in order from left to right, in "spines".',
   "",
   'For a spine you can genuinely read, set "title", and "author" when an author is printed.',
   'For a spine you can see but cannot read, set "title" to null and put whatever IS legible in',
@@ -51,8 +75,22 @@ const PROMPT = [
   "- Do not infer a book from context, from the books beside it, or from a series it might belong to.",
   "- Do not invent subtitles or series names that are not printed on the spine.",
   "- List only spines actually present in the photo. Do not pad the list out to a round number.",
-  "- Return an empty array if the photo has no books in it.",
+  '- Return an empty "spines" list if the photo has no books in it.',
 ].join("\n");
+
+/**
+ * The first reading's prompt. A teacher's count joins it only to settle which shelf was meant
+ * when the photo shows two about equally; it is phrased so it can't become a number to reach.
+ */
+function firstLookPrompt(expected: number | null): string {
+  if (expected === null) return PROMPT;
+  return [
+    PROMPT,
+    "",
+    `If it is unclear which shelf is meant, the teacher counted about ${expected} books on theirs: read the`,
+    "shelf whose spine count is nearer that. Never add or leave out spines to match it.",
+  ].join("\n");
+}
 
 /**
  * The second look, when the first came up short of the count a teacher gave. It sees what
@@ -86,16 +124,26 @@ function secondLookPrompt(expected: number, previous: SpineSighting[]): string {
 }
 
 const SCHEMA = {
-  type: "ARRAY",
-  items: {
-    type: "OBJECT",
-    properties: {
-      title: { type: "STRING", nullable: true },
-      author: { type: "STRING", nullable: true },
-      fragment: { type: "STRING", nullable: true },
+  type: "OBJECT",
+  properties: {
+    spines: {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: {
+          title: { type: "STRING", nullable: true },
+          author: { type: "STRING", nullable: true },
+          fragment: { type: "STRING", nullable: true },
+        },
+      },
     },
+    otherShelfSpines: { type: "INTEGER" },
   },
+  required: ["spines"],
 } as const;
+
+/** One reading of a photo: the shelf's spines, and how many from other shelves were left out. */
+export type ShelfReading = { sightings: SpineSighting[]; otherShelf: number };
 
 export function shelfScanConfigured(): boolean {
   return Boolean(process.env.GEMINI_API_KEY) || process.env.SHELF_SCAN_FIXTURES === "1";
@@ -127,62 +175,128 @@ function cleanSighting(value: unknown): SpineSighting | null {
 export async function readSpines(
   image: { data: ArrayBuffer; mimeType: string },
   fetchFn: typeof fetch = fetch,
-  /** A second look: the teacher's count, and what the first reading found. */
   again?: { expected: number; previous: SpineSighting[] },
 ): Promise<SpineSighting[]> {
+  return (await readShelf(image, fetchFn, again ? { again } : {})).sightings;
+}
+
+/**
+ * Reads the one shelf a photo shows. `expected` is the teacher's count, if they gave one;
+ * `again` makes this the second look, with the first reading to go on.
+ */
+export async function readShelf(
+  image: { data: ArrayBuffer; mimeType: string },
+  fetchFn: typeof fetch = fetch,
+  {
+    expected = null,
+    again,
+    deadline = Date.now() + TIMEOUT_MS,
+  }: {
+    expected?: number | null;
+    again?: { expected: number; previous: SpineSighting[] };
+    /** When this reading must be finished by (epoch ms), so a scan fits in its request. */
+    deadline?: number;
+  } = {},
+): Promise<ShelfReading> {
   if (process.env.SHELF_SCAN_FIXTURES === "1") {
-    const { FIXTURE_SHELF, FIXTURE_SECOND_LOOK } = await import("./fixtures");
-    return again ? FIXTURE_SECOND_LOOK : FIXTURE_SHELF;
+    const { FIXTURE_SHELF, FIXTURE_SECOND_LOOK, FIXTURE_OTHER_SHELF } = await import("./fixtures");
+    return { sightings: again ? FIXTURE_SECOND_LOOK : FIXTURE_SHELF, otherShelf: FIXTURE_OTHER_SHELF };
   }
 
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new ShelfScanUnavailableError("GEMINI_API_KEY is not set.");
+  if (!apiKey) throw new ShelfScanUnavailableError("GEMINI_API_KEY is not set.", "unconfigured");
   const model = process.env.GEMINI_MODEL || DEFAULT_MODEL;
-
-  let response: Response;
-  try {
-    response = await fetchFn(`${ENDPOINT}/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              { text: again ? secondLookPrompt(again.expected, again.previous) : PROMPT },
-              { inline_data: { mime_type: image.mimeType, data: Buffer.from(image.data).toString("base64") } },
-            ],
-          },
+  const pass = again ? "second look" : "first reading";
+  const body = JSON.stringify({
+    contents: [
+      {
+        parts: [
+          { text: again ? secondLookPrompt(again.expected, again.previous) : firstLookPrompt(expected) },
+          { inline_data: { mime_type: image.mimeType, data: Buffer.from(image.data).toString("base64") } },
         ],
-        // Temperature 0 keeps two photos of the same shelf from disagreeing with each other.
-        generationConfig: { responseMimeType: "application/json", responseSchema: SCHEMA, temperature: 0 },
-      }),
-    });
-  } catch (error) {
-    throw new ShelfScanUnavailableError(`Request failed: ${(error as Error).message}`);
-  }
+      },
+    ],
+    // Temperature 0 keeps two photos of the same shelf from disagreeing with each other.
+    generationConfig: { responseMimeType: "application/json", responseSchema: SCHEMA, temperature: 0 },
+  });
 
-  if (!response.ok) {
-    throw new ShelfScanUnavailableError(`HTTP ${response.status} from the image reader.`);
+  const started = Date.now();
+  const elapsed = () => `${pass}, ${model}, ${Date.now() - started}ms`;
+  let response: Response;
+  for (let attempt = 1; ; attempt++) {
+    const remaining = deadline - Date.now();
+    if (remaining < MIN_READING_MS) {
+      throw new ShelfScanUnavailableError(`No time left to start a reading (${elapsed()}).`, "timeout");
+    }
+    try {
+      response = await fetchFn(`${ENDPOINT}/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        signal: AbortSignal.timeout(Math.min(TIMEOUT_MS, remaining)),
+        body,
+      });
+    } catch (error) {
+      const timedOut = (error as Error).name === "TimeoutError" || (error as Error).name === "AbortError";
+      throw new ShelfScanUnavailableError(
+        `${timedOut ? "Timed out" : "Request failed"} (${elapsed()}): ${(error as Error).message}`,
+        timedOut ? "timeout" : "busy",
+      );
+    }
+    if (response.ok) break;
+
+    // Google explains a refusal in the body ("model is overloaded", "API key not valid",
+    // "quota exceeded"). Kept, briefly, for the log: it is the difference between waiting
+    // a minute and fixing a setting.
+    const detail = (await response.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 300);
+    const retryable = RETRYABLE.has(response.status);
+    if (retryable && attempt === 1 && deadline - Date.now() > MIN_READING_MS * 3) {
+      console.warn(`Shelf scan: HTTP ${response.status}, retrying once (${elapsed()}): ${detail}`);
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      continue;
+    }
+    throw new ShelfScanUnavailableError(
+      `HTTP ${response.status} (${elapsed()}): ${detail}`,
+      retryable ? "busy" : "refused",
+    );
   }
 
   const payload = (await response.json()) as {
-    candidates?: { content?: { parts?: { text?: string }[] } }[];
+    candidates?: { finishReason?: string; content?: { parts?: { text?: string; thought?: boolean }[] } }[];
+    promptFeedback?: { blockReason?: string };
   };
-  const raw = payload.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!raw) return [];
+  const candidate = payload.candidates?.[0];
+  // An answer can arrive in several parts; a model that thinks may also send its thoughts.
+  const raw = (candidate?.content?.parts ?? [])
+    .filter((part) => !part.thought)
+    .map((part) => part.text ?? "")
+    .join("");
+  const finish = candidate?.finishReason ?? payload.promptFeedback?.blockReason ?? "none";
+  if (!raw.trim()) {
+    // No answer at all is only "an empty shelf" when the model finished normally.
+    if (finish === "STOP") return { sightings: [], otherShelf: 0 };
+    throw new ShelfScanUnavailableError(`Empty answer, finish reason ${finish} (${elapsed()}).`, "unreadable");
+  }
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    throw new ShelfScanUnavailableError("The image reader returned something that wasn't a book list.");
+    throw new ShelfScanUnavailableError(
+      `Answer wasn't JSON, finish reason ${finish}, ${raw.length} characters (${elapsed()}).`,
+      "unreadable",
+    );
   }
-  if (!Array.isArray(parsed)) return [];
+  // The reader answers { spines, otherShelfSpines }; a bare list is accepted too, as older
+  // answers were, with nothing known about other shelves.
+  const record = parsed as { spines?: unknown; otherShelfSpines?: unknown } | null;
+  const list = Array.isArray(parsed) ? parsed : Array.isArray(record?.spines) ? record.spines : null;
+  if (!list) return { sightings: [], otherShelf: 0 };
+  const other = Array.isArray(parsed) ? 0 : Number(record?.otherShelfSpines);
+  const otherShelf = Number.isInteger(other) && other > 0 ? Math.min(other, 500) : 0;
 
   const sightings: SpineSighting[] = [];
   const seen = new Map<string, SpineSighting>();
-  for (const entry of parsed) {
+  for (const entry of list) {
     const sighting = cleanSighting(entry);
     if (!sighting) continue;
     if (sighting.reading) {
@@ -200,7 +314,9 @@ export async function readSpines(
     sightings.push(sighting);
     if (sightings.length >= MAX_READINGS) break;
   }
-  return sightings;
+  // How long a reading takes, and how big, is what tunes the time budget; worth a line each.
+  console.info(`Shelf scan: ${sightings.length} rows, ${otherShelf} left out, finish ${finish} (${elapsed()}).`);
+  return { sightings, otherShelf };
 }
 
 /** What makes two readings the same book, for folding copies together. */
