@@ -214,6 +214,69 @@ describe("handing over classes and books", () => {
     expect(await pendingHandoversTo(db, dan)).toHaveLength(1);
   });
 
+  describe("giving some of a title's copies", () => {
+    const FRINDLE = "9780689818769";
+    const give = (picks: { bookId: string; copies: number | null }[], classIds: string[] = []) =>
+      offerHandover(db, maria, { email: "dan@augprep.org", classIds, books: { kind: "picked", books: picks } });
+    const offered = async () => (await db.select({ bookIds: handovers.bookIds, copyIds: handovers.copyIds }).from(handovers))[0];
+
+    it("gives copies on the shelf first, highest-numbered first, so the sender keeps copy 1", async () => {
+      const frindle = await book(FRINDLE, "Frindle", [], maria, 3);
+      await loan(cy, frindle, 2, "Frindle", false); // copy 3 is out with a student who stays
+      expect(await give([{ bookId: frindle.bookId, copies: 1 }])).toMatchObject({ status: "sent", books: 1, copies: 1 });
+      expect(await offered()).toEqual({ bookIds: [], copyIds: [frindle.copyIds[1]] });
+      expect((await pendingHandoversTo(db, dan))[0]).toMatchObject({ books: 1, copies: 1 });
+    });
+
+    it("every copy is the whole title", async () => {
+      expect(await give([{ bookId: hatchet.bookId, copies: 2 }])).toMatchObject({ books: 1, copies: 2 });
+      expect(await offered()).toEqual({ bookIds: [hatchet.bookId], copyIds: [] });
+    });
+
+    it("moves them onto the recipient's title or a new one, and each checkout goes where its student goes", async () => {
+      const frindle = await book(FRINDLE, "Frindle", ["grade 5"], maria, 3);
+      const dansFrindle = await book(FRINDLE, "Frindle", [], dan, 1);
+      const cyHasCopy2 = await loan(cy, hatchet, 1, "Hatchet", false); // so copy 1 is the one that goes
+      const adaReadCopy1 = await loan(ada, hatchet, 0, "Hatchet", true); // Ada and copy 1 both go
+      const cyReadCopy1 = await loan(cy, hatchet, 0, "Hatchet", true); // copy 1 goes, Cy stays
+      const benReadCopy2 = await loan(ben, hatchet, 1, "Hatchet", true); // Ben goes, copy 2 stays
+
+      await give([{ bookId: hatchet.bookId, copies: 1 }, { bookId: frindle.bookId, copies: 2 }], [room12]);
+      const [waiting] = await pendingHandoversTo(db, dan);
+      expect(await acceptHandover(db, dan, waiting.id)).toMatchObject({ status: "accepted", books: 2, joined: 1 });
+
+      const copiesOf = (bookId: string) =>
+        db.select({ id: copies.id, n: copies.copyNumber, teacherId: copies.teacherId }).from(copies).where(eq(copies.bookId, bookId)).orderBy(copies.copyNumber);
+      // Maria keeps each title and the rest of its copies.
+      expect(await copiesOf(hatchet.bookId)).toEqual([{ id: hatchet.copyIds[1], n: 2, teacherId: maria }]);
+      expect(await copiesOf(frindle.bookId)).toEqual([{ id: frindle.copyIds[0], n: 1, teacherId: maria }]);
+      // Dan had no Hatchet, so he gets one with the same details; his Frindle gains two copies.
+      const [dansHatchet] = await db.select().from(books).where(and(eq(books.teacherId, dan), eq(books.isbn13, HATCHET)));
+      expect(dansHatchet).toMatchObject({ title: "Hatchet", tags: ["grade 5"] });
+      expect(await copiesOf(dansHatchet.id)).toEqual([{ id: hatchet.copyIds[0], n: 1, teacherId: dan }]);
+      expect(await copiesOf(dansFrindle.bookId)).toEqual([
+        { id: dansFrindle.copyIds[0], n: 1, teacherId: dan },
+        { id: frindle.copyIds[1], n: 2, teacherId: dan },
+        { id: frindle.copyIds[2], n: 3, teacherId: dan },
+      ]);
+
+      const loanRow = async (id: string) =>
+        (await db.select({ teacherId: loans.teacherId, bookId: loans.bookId, copyId: loans.copyId }).from(loans).where(eq(loans.id, id)))[0];
+      expect(await loanRow(adaReadCopy1)).toEqual({ teacherId: dan, bookId: dansHatchet.id, copyId: hatchet.copyIds[0] });
+      // Cy stays: the copy has gone, but it was Maria's Hatchet, and still is on her book page.
+      expect(await loanRow(cyReadCopy1)).toEqual({ teacherId: maria, bookId: hatchet.bookId, copyId: null });
+      expect(await loanRow(benReadCopy2)).toEqual({ teacherId: dan, bookId: null, copyId: null });
+      expect(await loanRow(cyHasCopy2)).toEqual({ teacherId: maria, bookId: hatchet.bookId, copyId: hatchet.copyIds[1] });
+    });
+
+    it("refuses a copy out with a student who stays, when it's the one that has to go", async () => {
+      await loan(cy, hatchet, 0, "Hatchet", false);
+      await loan(cy, hatchet, 1, "Hatchet", false);
+      const outcome = await give([{ bookId: hatchet.bookId, copies: 1 }]);
+      expect(outcome).toMatchObject({ status: "blocked", problems: [expect.stringMatching(/^Hatchet, copy 2, is checked out to Cy Park/)] });
+    });
+  });
+
   it("the database still refuses a half-done move when the transaction ends", async () => {
     await expect(
       db.transaction(async (tx) => {

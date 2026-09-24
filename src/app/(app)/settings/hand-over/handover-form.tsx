@@ -11,12 +11,13 @@ import { Select } from "@/ui/components/select";
 import { Checkbox, Radio, RadioGroup } from "@/ui/components/selection-controls";
 import { useSnackbar } from "@/ui/components/snackbar";
 import { TextField } from "@/ui/components/text-field";
-import { iconMail, iconMoveItem, iconSearch } from "@/ui/icons/generated";
+import { IconButton } from "@/ui/components/icon-button";
+import { iconAdd, iconMail, iconMoveItem, iconRemove, iconSearch } from "@/ui/icons/generated";
 import { offerHandoverAction, withdrawHandoverAction } from "../handover-actions";
 
 type Choices = {
   classes: { id: string; name: string; schoolYear: string; archived: boolean; students: number }[];
-  books: { id: string; title: string; authors: string[] }[];
+  books: { id: string; title: string; authors: string[]; copies: number }[];
   tags: { name: string; books: number }[];
   locations: { name: string; books: number }[];
 };
@@ -43,7 +44,8 @@ export function HandoverForm({ choices }: { choices: Choices }) {
   const [bookKind, setBookKind] = useState<BookSelection["kind"]>("none");
   const [tag, setTag] = useState<string | null>(null);
   const [location, setLocation] = useState<string | null>(null);
-  const [picked, setPicked] = useState<string[]>([]);
+  // Picked titles, each with how many of its copies go.
+  const [picked, setPicked] = useState<Record<string, number>>({});
   const [filter, setFilter] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -65,13 +67,22 @@ export function HandoverForm({ choices }: { choices: Choices }) {
         : bookKind === "location"
           ? (choices.locations.find((option) => option.name === location)?.books ?? 0)
           : bookKind === "picked"
-            ? picked.length
+            ? Object.keys(picked).length
             : 0;
+  const copyCount = bookKind === "picked" ? Object.values(picked).reduce((sum, n) => sum + n, 0) : null;
+  const totalCopies = useMemo(() => new Map(choices.books.map((book) => [book.id, book.copies])), [choices.books]);
 
   const selection = (): BookSelection | null => {
     if (bookKind === "tag") return tag ? { kind: "tag", tag } : null;
     if (bookKind === "location") return location ? { kind: "location", location } : null;
-    if (bookKind === "picked") return picked.length ? { kind: "picked", bookIds: picked } : null;
+    if (bookKind === "picked") {
+      const books = Object.entries(picked).map(([bookId, copies]) => ({
+        bookId,
+        // Every copy is the whole title.
+        copies: copies >= (totalCopies.get(bookId) ?? 0) ? null : copies,
+      }));
+      return books.length ? { kind: "picked", books } : null;
+    }
     return { kind: bookKind };
   };
 
@@ -102,7 +113,8 @@ export function HandoverForm({ choices }: { choices: Choices }) {
     router.refresh();
   }
 
-  const summary = [classIds.length && plural(classIds.length, "class", "classes"), bookCount && plural(bookCount, "book")]
+  const books = bookCount && plural(bookCount, "book") + (copyCount && copyCount > bookCount ? ` (${plural(copyCount, "copy", "copies")})` : "");
+  const summary = [classIds.length && plural(classIds.length, "class", "classes"), books]
     .filter(Boolean)
     .join(" and ");
 
@@ -176,20 +188,42 @@ export function HandoverForm({ choices }: { choices: Choices }) {
         {bookKind === "picked" && (
           <div className="flex flex-col gap-2">
             <TextField label="Find a book" value={filter} onChange={setFilter} leadingIcon={iconSearch} autoComplete="off" />
-            <p className="text-body-sm text-on-surface-variant">{`${plural(picked.length, "book")} chosen`}</p>
+            <p className="text-body-sm text-on-surface-variant">
+              {`${plural(bookCount, "book")} chosen. For a title with several copies, choose how many to give; you keep the rest.`}
+            </p>
             <div className="flex max-h-96 flex-col overflow-y-auto rounded-md bg-surface-container px-2">
-              {shown.map((book) => (
-                <Checkbox
-                  key={book.id}
-                  isSelected={picked.includes(book.id)}
-                  onChange={(on) => setPicked((ids) => (on ? [...ids, book.id] : ids.filter((id) => id !== book.id)))}
-                >
-                  <span className="truncate">
-                    {book.title}
-                    {book.authors.length > 0 && <span className="text-body-md text-on-surface-variant">{` · ${book.authors.join(", ")}`}</span>}
-                  </span>
-                </Checkbox>
-              ))}
+              {shown.map((book) => {
+                const chosen = picked[book.id];
+                return (
+                  <div key={book.id} className="flex min-h-12 items-center gap-2">
+                    <Checkbox
+                      className="min-w-0 grow"
+                      isSelected={chosen !== undefined}
+                      onChange={(on) =>
+                        setPicked((current) => {
+                          const next = { ...current };
+                          if (on) next[book.id] = book.copies;
+                          else delete next[book.id];
+                          return next;
+                        })
+                      }
+                    >
+                      <span className="truncate">
+                        {book.title}
+                        {book.authors.length > 0 && <span className="text-body-md text-on-surface-variant">{` · ${book.authors.join(", ")}`}</span>}
+                      </span>
+                    </Checkbox>
+                    {chosen !== undefined && book.copies > 1 && (
+                      <CopyStepper
+                        title={book.title}
+                        value={chosen}
+                        max={book.copies}
+                        onChange={(value) => setPicked((current) => ({ ...current, [book.id]: value }))}
+                      />
+                    )}
+                  </div>
+                );
+              })}
               {shown.length === 0 && <p className="px-2 py-3 text-body-md text-on-surface-variant">No books match.</p>}
             </div>
           </div>
@@ -222,12 +256,24 @@ export function HandoverForm({ choices }: { choices: Choices }) {
   );
 }
 
+/** How many of a title's copies go: at least one, at most all of them. */
+function CopyStepper({ title, value, max, onChange }: { title: string; value: number; max: number; onChange: (value: number) => void }) {
+  return (
+    <div role="group" aria-label={`Copies of ${title} to give`} className="flex shrink-0 items-center gap-1">
+      <IconButton icon={iconRemove} label={`One fewer copy of ${title}`} isDisabled={value <= 1} onPress={() => onChange(value - 1)} />
+      <span className="min-w-16 text-center text-body-md tabular-nums" aria-live="polite">{`${value} of ${max}`}</span>
+      <IconButton icon={iconAdd} label={`One more copy of ${title}`} isDisabled={value >= max} onPress={() => onChange(value + 1)} />
+    </div>
+  );
+}
+
 /** The offer that's out, waiting on the recipient. */
 export function PendingHandover({ offer }: { offer: HandoverSummary }) {
   const router = useRouter();
   const showSnackbar = useSnackbar();
   const [confirming, setConfirming] = useState(false);
-  const what = [offer.classNames.join(", "), offer.books && plural(offer.books, "book")].filter(Boolean).join(" and ");
+  const books = offer.books && plural(offer.books, "book") + (offer.copies > offer.books ? ` (${plural(offer.copies, "copy", "copies")})` : "");
+  const what = [offer.classNames.join(", "), books].filter(Boolean).join(" and ");
   return (
     <Section title={`Waiting for ${offer.toName}`} description={`You've offered ${offer.toName} (${offer.toEmail}) ${what}. Nothing moves until they accept it, from their Home page.`}>
       <div className="flex justify-end">

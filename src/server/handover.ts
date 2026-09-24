@@ -28,9 +28,11 @@ import { ConflictError, NotFoundError } from "./errors";
  * - A class takes its students, and a student takes their checkout history.
  * - A book takes its copies. If the recipient already owns the ISBN, the copies join
  *   their title instead of making a second one, the way the lending library does it.
- * - A past checkout that spans the split (the student moves and the book doesn't, or the
- *   other way round) stays with the student and lets go of the book, keeping the title it
- *   went out under, exactly as deleting the book would. A current one is refused: that
+ * - Some of a title's copies can go on their own. They join the recipient's title, or
+ *   start a new one with the same details, and the sender keeps the rest.
+ * - A past checkout that spans the split (the student moves and the copy doesn't, or the
+ *   other way round) stays with the student and lets go of the copy, keeping the title it
+ *   went out under, exactly as deleting the copy would. A current one is refused: that
  *   book is in a child's hands, and it has to come back first.
  * - The previous owner becomes a co-teacher of every class they handed over.
  */
@@ -40,7 +42,11 @@ export type BookSelection =
   | { kind: "all" }
   | { kind: "tag"; tag: string }
   | { kind: "location"; location: string }
-  | { kind: "picked"; bookIds: string[] };
+  /** `copies` null means every copy: the whole title. */
+  | { kind: "picked"; books: { bookId: string; copies: number | null }[] };
+
+/** What an offer moves: whole titles, and single copies from titles the sender keeps. */
+type Moving = { bookIds: string[]; copyIds: string[] };
 
 /** Everything the owner can choose from, for the hand-over form. */
 export async function listHandoverChoices(db: Database, teacherId: string) {
@@ -59,9 +65,18 @@ export async function listHandoverChoices(db: Database, teacherId: string) {
       .groupBy(classes.id)
       .orderBy(asc(classes.name)),
     db
-      .select({ id: books.id, title: books.title, authors: books.authors, tags: books.tags, location: books.location })
+      .select({
+        id: books.id,
+        title: books.title,
+        authors: books.authors,
+        tags: books.tags,
+        location: books.location,
+        copies: count(copies.id),
+      })
       .from(books)
+      .leftJoin(copies, and(eq(copies.bookId, books.id), eq(copies.teacherId, books.teacherId)))
       .where(eq(books.teacherId, teacherId))
+      .groupBy(books.id)
       .orderBy(asc(books.title)),
   ]);
   const tally = (values: string[]) => {
@@ -71,31 +86,83 @@ export async function listHandoverChoices(db: Database, teacherId: string) {
   };
   return {
     classes: classRows.map(({ archivedAt, ...klass }) => ({ ...klass, archived: archivedAt !== null })),
-    books: bookRows.map(({ id, title, authors }) => ({ id, title, authors })),
+    books: bookRows.map(({ id, title, authors, copies }) => ({ id, title, authors, copies })),
     tags: tally(bookRows.flatMap((book) => book.tags)),
     locations: tally(bookRows.flatMap((book) => (book.location ? [book.location] : []))),
   };
 }
 
-async function resolveBooks(db: Database, teacherId: string, selection: BookSelection): Promise<string[]> {
-  if (selection.kind === "none") return [];
+async function resolveBooks(db: Database, teacherId: string, selection: BookSelection): Promise<Moving> {
+  if (selection.kind === "none") return { bookIds: [], copyIds: [] };
+  if (selection.kind === "picked") return resolvePicked(db, teacherId, selection.books);
   const filter =
     selection.kind === "all"
       ? undefined
       : selection.kind === "tag"
         ? arrayContains(books.tags, [selection.tag])
-        : selection.kind === "location"
-          ? eq(books.location, selection.location)
-          : inList(books.id, selection.bookIds);
+        : eq(books.location, selection.location);
   const rows = await db
     .select({ id: books.id })
     .from(books)
     .where(and(eq(books.teacherId, teacherId), filter));
-  return rows.map((row) => row.id);
+  return { bookIds: rows.map((row) => row.id), copyIds: [] };
+}
+
+/**
+ * Picked titles, some with only a number of their copies. Which copies is chosen here, so
+ * the offer names exactly what moves: ones on the shelf first, then ones out with a
+ * student, then damaged, lost or withdrawn ones, and the highest-numbered of each before
+ * the lowest, so the sender keeps their copy 1. Asking for every copy is the whole title.
+ */
+async function resolvePicked(
+  db: Database,
+  teacherId: string,
+  picks: { bookId: string; copies: number | null }[],
+): Promise<Moving> {
+  const wanted = new Map(picks.map((pick) => [pick.bookId, pick.copies]));
+  const owned = await db
+    .select({ id: books.id })
+    .from(books)
+    .where(and(eq(books.teacherId, teacherId), inList(books.id, [...wanted.keys()])));
+  const rows = await db
+    .select({ id: copies.id, bookId: copies.bookId, copyNumber: copies.copyNumber, status: copies.status, loanId: loans.id })
+    .from(copies)
+    .leftJoin(loans, and(eq(loans.copyId, copies.id), eq(loans.teacherId, copies.teacherId), isNull(loans.closedAt)))
+    .where(and(eq(copies.teacherId, teacherId), inList(copies.bookId, owned.map((book) => book.id))));
+
+  const rank = (copy: (typeof rows)[number]) =>
+    copy.status === "in_circulation" ? (copy.loanId ? 1 : 0) : copy.status === "damaged" ? 2 : 3;
+  const moving: Moving = { bookIds: [], copyIds: [] };
+  for (const { id } of owned) {
+    const itsCopies = rows.filter((copy) => copy.bookId === id);
+    const howMany = wanted.get(id);
+    if (howMany == null || howMany >= itsCopies.length) {
+      moving.bookIds.push(id);
+      continue;
+    }
+    const chosen = itsCopies.sort((a, b) => rank(a) - rank(b) || b.copyNumber - a.copyNumber).slice(0, howMany);
+    moving.copyIds.push(...chosen.map((copy) => copy.id));
+  }
+  return moving;
+}
+
+/** How many titles and copies an offer moves, counted as the libraries stand now. */
+async function countMoving(db: Database, fromId: string, moving: Moving): Promise<{ books: number; copies: number }> {
+  const [whole, rows] = await Promise.all([
+    db
+      .select({ id: books.id })
+      .from(books)
+      .where(and(eq(books.teacherId, fromId), inList(books.id, moving.bookIds))),
+    db
+      .select({ bookId: copies.bookId })
+      .from(copies)
+      .where(and(eq(copies.teacherId, fromId), or(inList(copies.bookId, moving.bookIds), inList(copies.id, moving.copyIds)))),
+  ]);
+  return { books: new Set([...whole.map((book) => book.id), ...rows.map((row) => row.bookId)]).size, copies: rows.length };
 }
 
 export type OfferOutcome =
-  | { status: "sent"; recipientName: string; classes: number; books: number }
+  | { status: "sent"; recipientName: string; classes: number; books: number; copies: number }
   | { status: "blocked"; problems: string[] };
 
 /**
@@ -135,14 +202,16 @@ export async function offerHandover(
       .from(classes)
       .where(and(eq(classes.teacherId, fromId), inList(classes.id, input.classIds)))
   ).map((row) => row.id);
-  const bookIds = await resolveBooks(db, fromId, input.books);
-  if (classIds.length === 0 && bookIds.length === 0) throw new ConflictError("Choose at least one class or book to hand over.");
+  const moving = await resolveBooks(db, fromId, input.books);
+  if (classIds.length === 0 && moving.bookIds.length === 0 && moving.copyIds.length === 0) {
+    throw new ConflictError("Choose at least one class or book to hand over.");
+  }
 
-  const problems = await findProblems(db, fromId, recipient.id, classIds, bookIds);
+  const problems = await findProblems(db, fromId, recipient.id, classIds, moving);
   if (problems.length > 0) return { status: "blocked", problems };
 
-  await db.insert(handovers).values({ fromTeacherId: fromId, toTeacherId: recipient.id, classIds, bookIds });
-  return { status: "sent", recipientName: recipient.name, classes: classIds.length, books: bookIds.length };
+  await db.insert(handovers).values({ fromTeacherId: fromId, toTeacherId: recipient.id, classIds, ...moving });
+  return { status: "sent", recipientName: recipient.name, classes: classIds.length, ...(await countMoving(db, fromId, moving)) };
 }
 
 export type HandoverSummary = {
@@ -151,7 +220,9 @@ export type HandoverSummary = {
   toName: string;
   toEmail: string;
   classNames: string[];
+  /** Titles, whole or in part. */
   books: number;
+  copies: number;
   createdAt: Date;
 };
 
@@ -167,6 +238,7 @@ async function summarise(db: Database, where: SQL): Promise<HandoverSummary[]> {
       toEmail: recipient.email,
       classIds: handovers.classIds,
       bookIds: handovers.bookIds,
+      copyIds: handovers.copyIds,
       createdAt: handovers.createdAt,
     })
     .from(handovers)
@@ -178,16 +250,13 @@ async function summarise(db: Database, where: SQL): Promise<HandoverSummary[]> {
   // Counted live, so what the recipient is told matches what accepting would move.
   return Promise.all(
     offers.map(async (offer) => {
-      const [classRows, [{ bookCount }]] = await Promise.all([
+      const [classRows, moving] = await Promise.all([
         db
           .select({ name: classes.name })
           .from(classes)
           .where(and(eq(classes.teacherId, offer.fromId), inList(classes.id, offer.classIds)))
           .orderBy(asc(classes.name)),
-        db
-          .select({ bookCount: count() })
-          .from(books)
-          .where(and(eq(books.teacherId, offer.fromId), inList(books.id, offer.bookIds))),
+        countMoving(db, offer.fromId, { bookIds: offer.bookIds, copyIds: offer.copyIds }),
       ]);
       return {
         id: offer.id,
@@ -195,7 +264,7 @@ async function summarise(db: Database, where: SQL): Promise<HandoverSummary[]> {
         toName: offer.toName,
         toEmail: offer.toEmail,
         classNames: classRows.map((row) => row.name),
-        books: bookCount,
+        ...moving,
         createdAt: offer.createdAt,
       };
     }),
@@ -248,6 +317,7 @@ export async function acceptHandover(db: Database, toId: string, handoverId: str
           fromName: user.name,
           classIds: handovers.classIds,
           bookIds: handovers.bookIds,
+          copyIds: handovers.copyIds,
         })
         .from(handovers)
         .innerJoin(user, eq(user.id, handovers.fromTeacherId))
@@ -264,14 +334,37 @@ export async function acceptHandover(db: Database, toId: string, handoverId: str
           .where(and(eq(classes.teacherId, fromId), inList(classes.id, offer.classIds)))
           .for("update")
       ).map((row) => row.id);
+      let partial = await tx
+        .select({ id: copies.id, bookId: copies.bookId, copyNumber: copies.copyNumber })
+        .from(copies)
+        .where(and(eq(copies.teacherId, fromId), inList(copies.id, offer.copyIds), not(inList(copies.bookId, offer.bookIds))))
+        .orderBy(asc(copies.copyNumber))
+        .for("update");
+
+      // Copies given from a title that has none left besides them (the rest deleted since
+      // the offer) move as the whole title, so the sender isn't left with an empty one.
+      const partialBookIds = [...new Set(partial.map((copy) => copy.bookId))];
+      const totals = partialBookIds.length
+        ? await tx
+            .select({ bookId: copies.bookId, total: count() })
+            .from(copies)
+            .where(inArray(copies.bookId, partialBookIds))
+            .groupBy(copies.bookId)
+        : [];
+      const emptied = totals
+        .filter((row) => row.total === partial.filter((copy) => copy.bookId === row.bookId).length)
+        .map((row) => row.bookId);
+      partial = partial.filter((copy) => !emptied.includes(copy.bookId));
+
       const moving = await tx
         .select({ id: books.id, isbn13: books.isbn13 })
         .from(books)
-        .where(and(eq(books.teacherId, fromId), inList(books.id, offer.bookIds)))
+        .where(and(eq(books.teacherId, fromId), inList(books.id, [...offer.bookIds, ...emptied])))
         .for("update");
       const bookIds = moving.map((book) => book.id);
+      const partialIds = partial.map((copy) => copy.id);
 
-      const problems = await findProblems(tx, fromId, toId, classIds, bookIds);
+      const problems = await findProblems(tx, fromId, toId, classIds, { bookIds, copyIds: partialIds });
       if (problems.length > 0) return { status: "blocked" as const, fromName, problems };
 
       await tx.execute(sql`set constraints all deferred`);
@@ -282,45 +375,62 @@ export async function acceptHandover(db: Database, toId: string, handoverId: str
           .where(and(eq(students.teacherId, fromId), inList(students.classId, classIds)))
           .for("update")
       ).map((row) => row.id);
-      const copyIds = (
-        await tx
-          .select({ id: copies.id })
-          .from(copies)
-          .where(and(eq(copies.teacherId, fromId), inList(copies.bookId, bookIds)))
-      ).map((row) => row.id);
+      const copyIds = [
+        ...(
+          await tx
+            .select({ id: copies.id })
+            .from(copies)
+            .where(and(eq(copies.teacherId, fromId), inList(copies.bookId, bookIds)))
+        ).map((row) => row.id),
+        ...partialIds,
+      ];
 
-      // Past checkouts that span the split keep the student and let go of the book.
-      // (Current ones were refused above.)
+      // Past checkouts that span the split keep the student and let go of what doesn't go
+      // with them. (Current ones were refused above.)
+      const past = and(eq(loans.teacherId, fromId), isNotNull(loans.closedAt));
       const studentMoves = inList(loans.studentId, studentIds);
-      const bookMoves = inList(loans.bookId, bookIds);
+      // A student who stays keeps their history of a copy that goes: of the copy, and of the
+      // title too if the whole title goes.
+      await tx.update(loans).set({ copyId: null }).where(and(past, not(studentMoves), inList(loans.copyId, copyIds)));
+      await tx.update(loans).set({ bookId: null }).where(and(past, not(studentMoves), inList(loans.bookId, bookIds)));
+      // A student who goes lets go of a copy that stays.
       await tx
         .update(loans)
         .set({ copyId: null, bookId: null })
         .where(
           and(
-            eq(loans.teacherId, fromId),
-            isNotNull(loans.closedAt),
-            isNotNull(loans.bookId),
-            or(and(studentMoves, not(bookMoves)), and(not(studentMoves), bookMoves)),
+            past,
+            studentMoves,
+            or(isNull(loans.bookId), not(inList(loans.bookId, bookIds))),
+            or(isNull(loans.copyId), not(inList(loans.copyId, partialIds))),
           ),
         );
 
-      // Finished lending records for these books. Nothing shows them, and they name the
-      // old owner's shelf. Open ones were refused above.
+      // Finished lending records for these books and copies. Nothing shows them, and they
+      // name the old owner's shelf. Open ones were refused above.
       await tx
         .delete(shelfLoans)
         .where(
           and(
             notInArray(shelfLoans.status, ["requested", "active"]),
             or(
-              and(eq(shelfLoans.ownerTeacherId, fromId), inList(shelfLoans.bookId, bookIds)),
+              and(
+                eq(shelfLoans.ownerTeacherId, fromId),
+                or(inList(shelfLoans.bookId, bookIds), inList(shelfLoans.copyId, partialIds)),
+              ),
               and(eq(shelfLoans.borrowerTeacherId, fromId), inList(shelfLoans.borrowerCopyId, copyIds)),
             ),
           ),
         );
 
-      // Books the recipient already owns join their title as more copies.
-      const isbns = moving.flatMap((book) => (book.isbn13 ? [book.isbn13] : []));
+      // Titles the recipient already owns take what's given as more copies.
+      const partialBooks = partial.length
+        ? await tx
+            .select()
+            .from(books)
+            .where(and(eq(books.teacherId, fromId), inArray(books.id, [...new Set(partial.map((copy) => copy.bookId))])))
+        : [];
+      const isbns = [...moving, ...partialBooks].flatMap((book) => (book.isbn13 ? [book.isbn13] : []));
       const theirs = isbns.length
         ? await tx
             .select({ id: books.id, isbn13: books.isbn13 })
@@ -328,29 +438,70 @@ export async function acceptHandover(db: Database, toId: string, handoverId: str
             .where(and(eq(books.teacherId, toId), inArray(books.isbn13, isbns)))
         : [];
       const joinInto = new Map(theirs.map((book) => [book.isbn13, book.id]));
-      const joining = moving.filter((book) => book.isbn13 && joinInto.has(book.isbn13));
-      for (const book of joining) {
-        const targetId = joinInto.get(book.isbn13)!;
+      let joined = 0;
+
+      /** Moves copies onto the recipient's title, numbered after the copies it already has. */
+      const moveCopies = async (copyRows: { id: string }[], targetId: string) => {
         const [{ highest }] = await tx.select({ highest: max(copies.copyNumber) }).from(copies).where(eq(copies.bookId, targetId));
-        const itsCopies = await tx
-          .select({ id: copies.id })
-          .from(copies)
-          .where(eq(copies.bookId, book.id))
-          .orderBy(asc(copies.copyNumber));
-        for (const [index, copy] of itsCopies.entries()) {
+        for (const [index, copy] of copyRows.entries()) {
           await tx
             .update(copies)
             .set({ teacherId: toId, bookId: targetId, copyNumber: (highest ?? 0) + index + 1 })
             .where(eq(copies.id, copy.id));
         }
+      };
+
+      const joining = moving.filter((book) => book.isbn13 && joinInto.has(book.isbn13));
+      for (const book of joining) {
+        const targetId = joinInto.get(book.isbn13)!;
+        await moveCopies(
+          await tx.select({ id: copies.id }).from(copies).where(eq(copies.bookId, book.id)).orderBy(asc(copies.copyNumber)),
+          targetId,
+        );
         await tx.update(loans).set({ bookId: targetId }).where(eq(loans.bookId, book.id));
         await tx.delete(books).where(and(eq(books.id, book.id), eq(books.teacherId, fromId)));
+        joined++;
       }
 
       const whole = bookIds.filter((id) => !joining.some((book) => book.id === id));
       if (whole.length > 0) {
         await tx.update(books).set({ teacherId: toId }).where(and(eq(books.teacherId, fromId), inArray(books.id, whole)));
         await tx.update(copies).set({ teacherId: toId }).where(and(eq(copies.teacherId, fromId), inArray(copies.bookId, whole)));
+      }
+
+      // Some of a title's copies: onto the recipient's own title, or a new one with the
+      // same details. The sender keeps the title and the rest of its copies.
+      for (const book of partialBooks) {
+        const given = partial.filter((copy) => copy.bookId === book.id);
+        let targetId = book.isbn13 ? joinInto.get(book.isbn13) : undefined;
+        if (targetId) {
+          joined++;
+        } else {
+          [{ id: targetId }] = await tx
+            .insert(books)
+            .values({
+              teacherId: toId,
+              isbn13: book.isbn13,
+              title: book.title,
+              subtitle: book.subtitle,
+              authors: book.authors,
+              description: book.description,
+              coverUrl: book.coverUrl,
+              publisher: book.publisher,
+              publishedYear: book.publishedYear,
+              pageCount: book.pageCount,
+              readingLevel: book.readingLevel,
+              tags: book.tags,
+              location: book.location,
+              notes: book.notes,
+              lendable: book.lendable,
+              metadataSource: book.metadataSource,
+            })
+            .returning({ id: books.id });
+        }
+        await moveCopies(given, targetId);
+        // Only checkouts going with a student still name these copies; the rest let go above.
+        await tx.update(loans).set({ bookId: targetId }).where(inArray(loans.copyId, given.map((copy) => copy.id)));
       }
 
       if (classIds.length > 0) {
@@ -376,7 +527,13 @@ export async function acceptHandover(db: Database, toId: string, handoverId: str
       }
 
       await tx.update(handovers).set({ status: "accepted", respondedAt: new Date() }).where(eq(handovers.id, handoverId));
-      return { status: "accepted" as const, fromName, classes: classIds.length, books: bookIds.length, joined: joining.length };
+      return {
+        status: "accepted" as const,
+        fromName,
+        classes: classIds.length,
+        books: bookIds.length + partialBooks.length,
+        joined,
+      };
     });
   } catch (error) {
     if (error instanceof NotFoundError) throw error;
@@ -391,24 +548,26 @@ const MAX_PROBLEMS = 8;
 
 /**
  * Everything that would stop this hand-over, in words the sender can act on. Empty means
- * it can go ahead.
+ * it can go ahead. `moving.copyIds` are single copies from titles that stay.
  */
 async function findProblems(
   db: Database,
   fromId: string,
   toId: string,
   classIds: string[],
-  bookIds: string[],
+  moving: Moving,
 ): Promise<string[]> {
   const problems: string[] = [];
+  const { bookIds, copyIds: partialIds } = moving;
   const studentMoves = inList(students.classId, classIds);
 
-  // Books in children's hands, where the child and the book would end up in different classrooms.
+  // Books in children's hands, where the child and the copy would end up in different classrooms.
   const open = await db
     .select({
       title: books.title,
       copyNumber: copies.copyNumber,
       bookId: loans.bookId,
+      copyId: loans.copyId,
       firstName: students.firstName,
       lastName: students.lastName,
       classId: students.classId,
@@ -419,22 +578,28 @@ async function findProblems(
     .leftJoin(classes, and(eq(classes.id, students.classId), eq(classes.teacherId, students.teacherId)))
     .innerJoin(copies, and(eq(copies.id, loans.copyId), eq(copies.teacherId, loans.teacherId)))
     .innerJoin(books, and(eq(books.id, copies.bookId), eq(books.teacherId, copies.teacherId)))
-    .where(and(eq(loans.teacherId, fromId), isNull(loans.closedAt), or(studentMoves, inList(loans.bookId, bookIds))))
+    .where(
+      and(
+        eq(loans.teacherId, fromId),
+        isNull(loans.closedAt),
+        or(studentMoves, inList(loans.bookId, bookIds), inList(loans.copyId, partialIds)),
+      ),
+    )
     .orderBy(asc(books.title));
   for (const loan of open) {
     const studentGoes = loan.classId !== null && classIds.includes(loan.classId);
-    const bookGoes = loan.bookId !== null && bookIds.includes(loan.bookId);
-    if (studentGoes === bookGoes) continue;
+    const copyGoes = (loan.bookId !== null && bookIds.includes(loan.bookId)) || (loan.copyId !== null && partialIds.includes(loan.copyId));
+    if (studentGoes === copyGoes) continue;
     const who = `${loan.firstName} ${loan.lastName}`.trim() + (loan.className ? ` (${loan.className})` : "");
     problems.push(
-      bookGoes
+      copyGoes
         ? `${loan.title}, copy ${loan.copyNumber}, is checked out to ${who}, who isn't part of this hand-over. Check it in first.`
         : `${who} has ${loan.title}, copy ${loan.copyNumber}, which isn't part of this hand-over. Check it in first.`,
     );
   }
 
-  // Books lent to or borrowed from another teacher, or asked for.
-  if (bookIds.length > 0) {
+  // Copies lent to or borrowed from another teacher, or titles asked for.
+  if (bookIds.length > 0 || partialIds.length > 0) {
     const lending = await db
       .select({ title: books.title, status: shelfLoans.status, ownerId: shelfLoans.ownerTeacherId })
       .from(shelfLoans)
@@ -442,7 +607,7 @@ async function findProblems(
       .innerJoin(books, and(eq(books.id, copies.bookId), eq(books.teacherId, copies.teacherId)))
       .where(
         and(
-          inArray(books.id, bookIds),
+          or(inList(books.id, bookIds), inList(copies.id, partialIds)),
           eq(books.teacherId, fromId),
           or(
             and(eq(shelfLoans.ownerTeacherId, fromId), eq(shelfLoans.status, "active")),
@@ -450,11 +615,6 @@ async function findProblems(
           ),
         ),
       );
-    const requested = await db
-      .select({ title: books.title })
-      .from(shelfLoans)
-      .innerJoin(books, and(eq(books.id, shelfLoans.bookId), eq(books.teacherId, shelfLoans.ownerTeacherId)))
-      .where(and(eq(shelfLoans.ownerTeacherId, fromId), eq(shelfLoans.status, "requested"), inArray(books.id, bookIds)));
     for (const loan of lending) {
       problems.push(
         loan.ownerId === fromId
@@ -462,6 +622,14 @@ async function findProblems(
           : `${loan.title} is borrowed from another teacher. Send it back first.`,
       );
     }
+  }
+  // A request is for a title, so it only stands in the way when the whole title goes.
+  if (bookIds.length > 0) {
+    const requested = await db
+      .select({ title: books.title })
+      .from(shelfLoans)
+      .innerJoin(books, and(eq(books.id, shelfLoans.bookId), eq(books.teacherId, shelfLoans.ownerTeacherId)))
+      .where(and(eq(shelfLoans.ownerTeacherId, fromId), eq(shelfLoans.status, "requested"), inArray(books.id, bookIds)));
     for (const request of requested) {
       problems.push(`Another teacher has asked to borrow ${request.title}. Answer the request first.`);
     }

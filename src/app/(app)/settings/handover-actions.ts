@@ -29,7 +29,13 @@ const offerInput = z.object({
     z.object({ kind: z.literal("all") }),
     z.object({ kind: z.literal("tag"), tag: z.string().trim().min(1, "Choose a tag.").max(40) }),
     z.object({ kind: z.literal("location"), location: z.string().trim().min(1, "Choose a bin or shelf.").max(60) }),
-    z.object({ kind: z.literal("picked"), bookIds: z.array(z.uuid()).min(1, "Choose at least one book.").max(5000) }),
+    z.object({
+      kind: z.literal("picked"),
+      books: z
+        .array(z.object({ bookId: z.uuid(), copies: z.number().int().min(1).max(1000).nullable() }))
+        .min(1, "Choose at least one book.")
+        .max(5000),
+    }),
   ]),
 });
 
