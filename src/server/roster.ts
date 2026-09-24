@@ -2,6 +2,7 @@ import { and, asc, count, desc, eq, ilike, inArray, isNull, or, type SQL, sql } 
 import type { Database } from "@/db/client";
 import { books, classes, copies, loans, students } from "@/db/schema";
 import type { ParsedStudent } from "@/lib/roster-parse";
+import { inScope } from "./coteaching";
 import { ConflictError, isUniqueViolation, NotFoundError } from "./errors";
 
 export type ClassInput = { name: string; schoolYear: string };
@@ -70,7 +71,13 @@ export type ClassSummary = {
   overdue: number;
 };
 
-export async function listClasses(db: Database, teacherId: string, today: string): Promise<ClassSummary[]> {
+/** `classIds` limits the list to a co-teacher's shared classes; null or absent means every class. */
+export async function listClasses(
+  db: Database,
+  teacherId: string,
+  today: string,
+  classIds: readonly string[] | null = null,
+): Promise<ClassSummary[]> {
   const studentCounts = db
     .select({
       classId: students.classId,
@@ -106,22 +113,22 @@ export async function listClasses(db: Database, teacherId: string, today: string
     .from(classes)
     .leftJoin(studentCounts, eq(studentCounts.classId, classes.id))
     .leftJoin(openLoans, eq(openLoans.classId, classes.id))
-    .where(eq(classes.teacherId, teacherId))
+    .where(and(eq(classes.teacherId, teacherId), inScope(classes.id, classIds)))
     .orderBy(desc(classes.schoolYear), asc(sql`lower(${classes.name})`));
   return rows;
 }
 
 /** Active students and classes that aren't archived. */
-export async function rosterCounts(db: Database, teacherId: string) {
+export async function rosterCounts(db: Database, teacherId: string, classIds: readonly string[] | null = null) {
   const [[studentTotals], [classTotals]] = await Promise.all([
     db
       .select({ count: count() })
       .from(students)
-      .where(and(eq(students.teacherId, teacherId), eq(students.active, true))),
+      .where(and(eq(students.teacherId, teacherId), eq(students.active, true), inScope(students.classId, classIds))),
     db
       .select({ count: count() })
       .from(classes)
-      .where(and(eq(classes.teacherId, teacherId), isNull(classes.archivedAt))),
+      .where(and(eq(classes.teacherId, teacherId), isNull(classes.archivedAt), inScope(classes.id, classIds))),
   ]);
   return { students: studentTotals.count, classes: classTotals.count };
 }
@@ -330,9 +337,11 @@ export type StudentOption = {
 export async function findStudents(
   db: Database,
   teacherId: string,
-  options: { today: string; classId?: string; query?: string; limit?: number },
+  options: { today: string; classId?: string; query?: string; limit?: number; classIds?: readonly string[] | null },
 ): Promise<StudentOption[]> {
   const conditions: SQL[] = [eq(students.teacherId, teacherId), eq(students.active, true)];
+  const scope = inScope(students.classId, options.classIds);
+  if (scope) conditions.push(scope);
   if (options.classId) conditions.push(eq(students.classId, options.classId));
   const query = options.query?.trim();
   if (query) {

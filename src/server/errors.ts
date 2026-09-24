@@ -20,8 +20,21 @@ export class LimitError extends Error {
   }
 }
 
-export function isUserFacingError(error: unknown): error is NotFoundError | ConflictError | LimitError {
-  return error instanceof NotFoundError || error instanceof ConflictError || error instanceof LimitError;
+/** Something only a class's owner may do, attempted by one of its co-teachers. */
+export class ForbiddenError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ForbiddenError";
+  }
+}
+
+export function isUserFacingError(error: unknown): error is NotFoundError | ConflictError | LimitError | ForbiddenError {
+  return (
+    error instanceof NotFoundError ||
+    error instanceof ConflictError ||
+    error instanceof LimitError ||
+    error instanceof ForbiddenError
+  );
 }
 
 /** Postgres unique_violation, optionally for a specific constraint or index. */

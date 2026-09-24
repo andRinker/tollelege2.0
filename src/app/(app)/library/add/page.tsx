@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { getDb } from "@/db/client";
 import { catalogSummary } from "@/server/catalog";
 import { describeExpiry, latestScanEventSeq, listActivePairings } from "@/server/scan-pairing";
-import { requireTeacher } from "@/server/session";
+import { requireClassroom } from "@/server/session";
 import { getRequestSettings } from "@/server/theme";
 import { LinkButton } from "@/ui/components/button";
 import { PageHeader } from "@/ui/components/expressive";
@@ -18,13 +18,16 @@ export const metadata: Metadata = { title: "Add books" };
 export const maxDuration = 60;
 
 export default async function AddBooksPage() {
-  const { teacherId } = await requireTeacher();
+  const { teacherId, isOwner } = await requireClassroom();
   const db = getDb();
+  // Phone pairing is the owner's: it's revoked when *they* sign out, so a co-teacher's
+  // pairing would outlive their session with no one to end it. The feed that follows it
+  // is read by the owner's cookie too. Everything else on this page works the same.
   const [settings, summary, pairedPhones, scanCursor] = await Promise.all([
     getRequestSettings(),
     catalogSummary(db, teacherId),
-    listActivePairings(db, teacherId),
-    latestScanEventSeq(db, teacherId),
+    isOwner ? listActivePairings(db, teacherId) : [],
+    isOwner ? latestScanEventSeq(db, teacherId) : 0,
   ]);
 
   return (
@@ -47,6 +50,7 @@ export default async function AddBooksPage() {
           expiresLabel: describeExpiry(phone.expiresAt, settings.timeZone),
         }))}
         scanCursor={scanCursor}
+        phonePairing={isOwner}
       />
     </>
   );

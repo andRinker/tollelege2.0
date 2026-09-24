@@ -28,9 +28,11 @@ type Props = {
   variant: "menu" | "page";
   /** Where to go after deleting from the student page. */
   afterDeleteHref?: string;
+  /** False for a co-teacher: deleting a student erases their history, so it stays with the owner. */
+  canDelete?: boolean;
 };
 
-export function StudentActions({ student, classes, variant, afterDeleteHref }: Props) {
+export function StudentActions({ student, classes, variant, afterDeleteHref, canDelete = true }: Props) {
   const router = useRouter();
   const showSnackbar = useSnackbar();
   const [dialog, setDialog] = useState<"edit" | "delete" | null>(null);
@@ -66,10 +68,12 @@ export function StudentActions({ student, classes, variant, afterDeleteHref }: P
           <MenuItem id="active" icon={student.active ? iconPersonRemove : iconPerson}>
             {student.active ? "Mark inactive" : "Mark active"}
           </MenuItem>
-          <MenuDivider />
-          <MenuItem id="delete" icon={iconDelete} destructive>
-            {student.booksOut > 0 ? "Delete (check in books first)" : "Delete student"}
-          </MenuItem>
+          {canDelete && <MenuDivider />}
+          {canDelete && (
+            <MenuItem id="delete" icon={iconDelete} destructive>
+              {student.booksOut > 0 ? "Delete (check in books first)" : "Delete student"}
+            </MenuItem>
+          )}
         </Menu>
       </MenuTrigger>
 

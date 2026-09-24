@@ -79,9 +79,11 @@ type AddBooksProps = {
   pairedPhones: PairedPhone[];
   /** Where the scan feed stood when the page rendered. */
   scanCursor: number;
+  /** Whether to offer a phone as the scanner. Off in a classroom you co-teach. */
+  phonePairing?: boolean;
 };
 
-export function AddBooks({ readingLevelSystem, suggestions, pairedPhones, scanCursor }: AddBooksProps) {
+export function AddBooks({ readingLevelSystem, suggestions, pairedPhones, scanCursor, phonePairing = true }: AddBooksProps) {
   const router = useRouter();
   const showSnackbar = useSnackbar();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -189,7 +191,7 @@ export function AddBooks({ readingLevelSystem, suggestions, pairedPhones, scanCu
     router.refresh();
   }, [router, armedGap, fillGap]);
 
-  useScanFeed(true, scanCursor, onScanEvents);
+  useScanFeed(phonePairing, scanCursor, onScanEvents);
 
   function refocus() {
     setIsbnInput("");
@@ -315,9 +317,11 @@ export function AddBooks({ readingLevelSystem, suggestions, pairedPhones, scanCu
         </Button>
       </Section>
 
-      <Section className="expanded:col-start-1">
-        <PhonePairing paired={pairedPhones} connected={phoneScanning} />
-      </Section>
+      {phonePairing && (
+        <Section className="expanded:col-start-1">
+          <PhonePairing paired={pairedPhones} connected={phoneScanning} />
+        </Section>
+      )}
 
       <div className="flex min-w-0 flex-col gap-4">
         {rapid ? (

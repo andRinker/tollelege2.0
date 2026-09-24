@@ -2,6 +2,7 @@ import { and, asc, count, desc, eq, gte, ilike, isNotNull, isNull, notExists, or
 import { alias } from "drizzle-orm/pg-core";
 import type { Database } from "@/db/client";
 import { books, classes, copies, loans, students, teacherSettings } from "@/db/schema";
+import { inScope } from "./coteaching";
 import { ConflictError, isUniqueViolation, LimitError, NotFoundError } from "./errors";
 
 /** How long a checkout or return can be undone. */
@@ -241,9 +242,19 @@ export type OpenLoan = {
 export async function listOpenLoans(
   db: Database,
   teacherId: string,
-  options: { today: string; bookId?: string; studentId?: string; overdueOnly?: boolean; limit?: number },
+  options: {
+    today: string;
+    bookId?: string;
+    studentId?: string;
+    overdueOnly?: boolean;
+    limit?: number;
+    /** A co-teacher's shared classes: only their students' checkouts. */
+    classIds?: readonly string[] | null;
+  },
 ): Promise<OpenLoan[]> {
   const conditions: SQL[] = [eq(loans.teacherId, teacherId), isNull(loans.closedAt)];
+  const scope = inScope(students.classId, options.classIds);
+  if (scope) conditions.push(scope);
   if (options.bookId) conditions.push(eq(books.id, options.bookId));
   if (options.studentId) conditions.push(eq(loans.studentId, options.studentId));
   if (options.overdueOnly) conditions.push(sql`${loans.dueOn} < ${options.today}`);
@@ -274,7 +285,13 @@ export async function listOpenLoans(
     .limit(options.limit ?? 1000);
 }
 
-export async function circulationStats(db: Database, teacherId: string, today: string, timeZone: string) {
+export async function circulationStats(
+  db: Database,
+  teacherId: string,
+  today: string,
+  timeZone: string,
+  classIds: readonly string[] | null = null,
+) {
   const [row] = await db
     .select({
       booksOut: sql<number>`count(*) filter (where ${loans.closedAt} is null)`.mapWith(Number),
@@ -284,7 +301,8 @@ export async function circulationStats(db: Database, teacherId: string, today: s
       returnedToday: sql<number>`count(*) filter (where ${loans.closeReason} = 'returned' and (${loans.closedAt} at time zone ${timeZone})::date = ${today}::date)`.mapWith(Number),
     })
     .from(loans)
-    .where(eq(loans.teacherId, teacherId));
+    .innerJoin(students, eq(students.id, loans.studentId))
+    .where(and(eq(loans.teacherId, teacherId), inScope(students.classId, classIds)));
   return row;
 }
 
@@ -301,7 +319,12 @@ export type ActivityItem = {
 };
 
 /** The most recent checkouts and returns, newest first. */
-export async function recentActivity(db: Database, teacherId: string, limit = 8): Promise<ActivityItem[]> {
+export async function recentActivity(
+  db: Database,
+  teacherId: string,
+  limit = 8,
+  classIds: readonly string[] | null = null,
+): Promise<ActivityItem[]> {
   const rows = await db
     .select({
       loanId: loans.id,
@@ -318,7 +341,7 @@ export async function recentActivity(db: Database, teacherId: string, limit = 8)
     .from(loans)
     .leftJoin(books, eq(books.id, loans.bookId))
     .innerJoin(students, eq(students.id, loans.studentId))
-    .where(eq(loans.teacherId, teacherId))
+    .where(and(eq(loans.teacherId, teacherId), inScope(students.classId, classIds)))
     .orderBy(desc(sql`coalesce(${loans.closedAt}, ${loans.checkedOutAt})`))
     .limit(limit);
 

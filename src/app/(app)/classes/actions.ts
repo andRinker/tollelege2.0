@@ -17,7 +17,8 @@ import {
   updateClass,
   updateStudent,
 } from "@/server/roster";
-import { requireTeacher } from "@/server/session";
+import { assertClassInScope, assertOwner, assertStudentInScope, type Classroom } from "@/server/coteaching";
+import { requireClassroom } from "@/server/session";
 
 function handleError(error: unknown): { ok: false; message: string } {
   if (isUserFacingError(error)) return fail(error.message);
@@ -59,21 +60,41 @@ function firstIssue(error: z.ZodError) {
   return error.issues[0]?.message ?? "Check the details and try again.";
 }
 
+/**
+ * Where a co-teacher may put a student: one of their shared classes, never "no class",
+ * which would take the student out of every class they can see.
+ */
+async function assertStudentClassAllowed(classroom: Classroom, classId: string | null): Promise<void> {
+  if (classId === null) {
+    assertOwner(classroom, "take a student out of their classes");
+    return;
+  }
+  await assertClassInScope(getDb(), classroom, classId);
+}
+
 export async function createClassAction(input: z.input<typeof classInput>): Promise<ActionResult<{ classId: string }>> {
-  const { teacherId } = await requireTeacher();
+  const classroom = await requireClassroom();
+  const { teacherId } = classroom;
   const parsed = classInput.safeParse(input);
   if (!parsed.success) return fail(firstIssue(parsed.error));
-  const klass = await createClass(getDb(), teacherId, parsed.data);
-  revalidateRosters();
-  return ok({ classId: klass.id });
+  try {
+    assertOwner(classroom, "add classes to this classroom");
+    const klass = await createClass(getDb(), teacherId, parsed.data);
+    revalidateRosters();
+    return ok({ classId: klass.id });
+  } catch (error) {
+    return handleError(error);
+  }
 }
 
 export async function updateClassAction(classId: string, input: z.input<typeof classInput>): Promise<ActionResult> {
-  const { teacherId } = await requireTeacher();
+  const classroom = await requireClassroom();
+  const { teacherId } = classroom;
   const parsed = classInput.safeParse(input);
   if (!id.safeParse(classId).success) return fail("That class wasn't found.");
   if (!parsed.success) return fail(firstIssue(parsed.error));
   try {
+    assertOwner(classroom, "rename this class");
     await updateClass(getDb(), teacherId, classId, parsed.data);
     revalidateRosters();
     return ok();
@@ -83,9 +104,11 @@ export async function updateClassAction(classId: string, input: z.input<typeof c
 }
 
 export async function archiveClassAction(classId: string, archived: boolean): Promise<ActionResult> {
-  const { teacherId } = await requireTeacher();
+  const classroom = await requireClassroom();
+  const { teacherId } = classroom;
   if (!id.safeParse(classId).success) return fail("That class wasn't found.");
   try {
+    assertOwner(classroom, "archive this class");
     await setClassArchived(getDb(), teacherId, classId, archived);
     revalidateRosters();
     return ok();
@@ -95,9 +118,11 @@ export async function archiveClassAction(classId: string, archived: boolean): Pr
 }
 
 export async function deleteClassAction(classId: string): Promise<ActionResult> {
-  const { teacherId } = await requireTeacher();
+  const classroom = await requireClassroom();
+  const { teacherId } = classroom;
   if (!id.safeParse(classId).success) return fail("That class wasn't found.");
   try {
+    assertOwner(classroom, "delete this class");
     await deleteClass(getDb(), teacherId, classId);
     revalidateRosters();
     return ok();
@@ -110,11 +135,13 @@ export async function addStudentAction(
   classId: string | null,
   input: z.input<typeof studentInput>,
 ): Promise<ActionResult<{ studentId: string }>> {
-  const { teacherId } = await requireTeacher();
+  const classroom = await requireClassroom();
+  const { teacherId } = classroom;
   if (classId !== null && !id.safeParse(classId).success) return fail("That class wasn't found.");
   const parsed = studentInput.safeParse(input);
   if (!parsed.success) return fail(firstIssue(parsed.error));
   try {
+    await assertStudentClassAllowed(classroom, classId);
     const student = await addStudent(getDb(), teacherId, classId, parsed.data);
     revalidateRosters();
     return ok({ studentId: student!.id });
@@ -127,11 +154,13 @@ export async function importStudentsAction(
   classId: string,
   incoming: Array<z.input<typeof studentInput>>,
 ): Promise<ActionResult<{ added: number; skipped: number }>> {
-  const { teacherId } = await requireTeacher();
+  const classroom = await requireClassroom();
+  const { teacherId } = classroom;
   if (!id.safeParse(classId).success) return fail("That class wasn't found.");
   const parsed = z.array(studentInput).min(1, "There are no students to add.").max(MAX_IMPORT_ROWS).safeParse(incoming);
   if (!parsed.success) return fail(firstIssue(parsed.error));
   try {
+    await assertStudentClassAllowed(classroom, classId);
     const result = await importStudents(getDb(), teacherId, classId, parsed.data);
     revalidateRosters();
     return ok(result);
@@ -144,13 +173,16 @@ export async function updateStudentAction(
   studentId: string,
   input: z.input<typeof studentInput> & { classId: string | null },
 ): Promise<ActionResult> {
-  const { teacherId } = await requireTeacher();
+  const classroom = await requireClassroom();
+  const { teacherId } = classroom;
   const parsed = studentInput.safeParse(input);
   if (!id.safeParse(studentId).success || (input.classId !== null && !id.safeParse(input.classId).success)) {
     return fail("That student wasn't found.");
   }
   if (!parsed.success) return fail(firstIssue(parsed.error));
   try {
+    await assertStudentInScope(getDb(), classroom, studentId);
+    await assertStudentClassAllowed(classroom, input.classId);
     await updateStudent(getDb(), teacherId, studentId, { ...parsed.data, classId: input.classId });
     revalidateRosters();
     return ok();
@@ -160,9 +192,11 @@ export async function updateStudentAction(
 }
 
 export async function setStudentActiveAction(studentId: string, active: boolean): Promise<ActionResult> {
-  const { teacherId } = await requireTeacher();
+  const classroom = await requireClassroom();
+  const { teacherId } = classroom;
   if (!id.safeParse(studentId).success) return fail("That student wasn't found.");
   try {
+    await assertStudentInScope(getDb(), classroom, studentId);
     await setStudentActive(getDb(), teacherId, studentId, active);
     revalidateRosters();
     return ok();
@@ -172,9 +206,11 @@ export async function setStudentActiveAction(studentId: string, active: boolean)
 }
 
 export async function deleteStudentAction(studentId: string): Promise<ActionResult> {
-  const { teacherId } = await requireTeacher();
+  const classroom = await requireClassroom();
+  const { teacherId } = classroom;
   if (!id.safeParse(studentId).success) return fail("That student wasn't found.");
   try {
+    assertOwner(classroom, "delete students, since it erases their reading history");
     await deleteStudent(getDb(), teacherId, studentId);
     revalidateRosters();
     return ok();

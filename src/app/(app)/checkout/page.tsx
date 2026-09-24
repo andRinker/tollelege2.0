@@ -3,7 +3,8 @@ import { z } from "zod";
 import { getDb } from "@/db/client";
 import { addDays, todayInTimeZone } from "@/lib/dates";
 import { findStudents, listClasses } from "@/server/roster";
-import { requireTeacher } from "@/server/session";
+import { requireClassroom } from "@/server/session";
+import { getTeacherSettings } from "@/server/settings";
 import { getRequestSettings } from "@/server/theme";
 import { LinkButton } from "@/ui/components/button";
 import { EmptyState, PageHeader } from "@/ui/components/expressive";
@@ -13,12 +14,16 @@ import { CheckoutFlow } from "./checkout-flow";
 export const metadata: Metadata = { title: "Check out" };
 
 export default async function CheckoutPage({ searchParams }: PageProps<"/checkout">) {
-  const { teacherId } = await requireTeacher();
+  const { teacherId, classIds } = await requireClassroom();
   const { student } = await searchParams;
-  const settings = await getRequestSettings();
-  const today = todayInTimeZone(settings.timeZone);
   const db = getDb();
-  const [students, classes] = await Promise.all([findStudents(db, teacherId, { today }), listClasses(db, teacherId, today)]);
+  // Your own display settings; the classroom owner's circulation rules (loan period, limit).
+  const [settings, rules] = await Promise.all([getRequestSettings(), getTeacherSettings(db, teacherId)]);
+  const today = todayInTimeZone(settings.timeZone);
+  const [students, classes] = await Promise.all([
+    findStudents(db, teacherId, { today, classIds }),
+    listClasses(db, teacherId, today, classIds),
+  ]);
   const initialStudentId = typeof student === "string" && z.uuid().safeParse(student).success ? student : null;
 
   if (students.length === 0) {
@@ -45,8 +50,8 @@ export default async function CheckoutPage({ searchParams }: PageProps<"/checkou
       students={students}
       classes={classes.filter((klass) => !klass.archivedAt).map(({ id, name }) => ({ id, name }))}
       today={today}
-      defaultDueOn={settings.loanPeriodDays ? addDays(today, settings.loanPeriodDays) : null}
-      maxBooksPerStudent={settings.maxBooksPerStudent}
+      defaultDueOn={rules.loanPeriodDays ? addDays(today, rules.loanPeriodDays) : null}
+      maxBooksPerStudent={rules.maxBooksPerStudent}
       initialStudentId={initialStudentId}
     />
   );

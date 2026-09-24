@@ -23,7 +23,8 @@ import {
 import { isUserFacingError } from "@/server/errors";
 import { type BookMetadata, lookupIsbn } from "@/server/isbn-lookup";
 import { addBookByScan, type QuickAddOutcome } from "@/server/quick-add";
-import { requireTeacher } from "@/server/session";
+import { assertOwner } from "@/server/coteaching";
+import { requireClassroom } from "@/server/session";
 import {
   checkPhoto,
   scanShelf,
@@ -92,7 +93,8 @@ export type LookupActionResult =
   | { status: "unavailable"; isbn13: string };
 
 export async function lookupIsbnAction(raw: string): Promise<LookupActionResult> {
-  const { teacherId } = await requireTeacher();
+  const classroom = await requireClassroom();
+  const { teacherId } = classroom;
   const isbn13 = normalizeIsbn(String(raw));
   if (!isbn13) return { status: "invalid" };
 
@@ -106,7 +108,8 @@ export async function lookupIsbnAction(raw: string): Promise<LookupActionResult>
 }
 
 export async function addBookAction(input: BookDetailsInput, copyCount: number): Promise<ActionResult<{ bookId: string }>> {
-  const { teacherId } = await requireTeacher();
+  const classroom = await requireClassroom();
+  const { teacherId } = classroom;
   const parsed = bookDetails.safeParse(input);
   if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Check the book details.");
   const copiesToAdd = z.number().int().min(1).max(100).safeParse(copyCount);
@@ -124,7 +127,8 @@ export async function addBookAction(input: BookDetailsInput, copyCount: number):
 export type QuickAddActionResult = QuickAddOutcome | { status: "error"; isbn13: string; message: string };
 
 export async function quickAddAction(raw: string): Promise<QuickAddActionResult> {
-  const { teacherId } = await requireTeacher();
+  const classroom = await requireClassroom();
+  const { teacherId } = classroom;
   try {
     const outcome = await addBookByScan(getDb(), teacherId, raw);
     if (outcome.status === "added") revalidateLibrary();
@@ -135,7 +139,8 @@ export async function quickAddAction(raw: string): Promise<QuickAddActionResult>
 }
 
 export async function undoQuickAddAction(copyId: string): Promise<ActionResult<{ outcome: "copy_removed" | "book_removed" }>> {
-  const { teacherId } = await requireTeacher();
+  const classroom = await requireClassroom();
+  const { teacherId } = classroom;
   if (!id.safeParse(copyId).success) return fail("That copy wasn't found.");
   try {
     const outcome = await undoQuickAdd(getDb(), teacherId, copyId);
@@ -147,7 +152,8 @@ export async function undoQuickAddAction(copyId: string): Promise<ActionResult<{
 }
 
 export async function updateBookAction(bookId: string, input: BookDetailsInput): Promise<ActionResult> {
-  const { teacherId } = await requireTeacher();
+  const classroom = await requireClassroom();
+  const { teacherId } = classroom;
   const parsed = bookDetails.safeParse(input);
   if (!id.safeParse(bookId).success || !parsed.success) {
     return fail(parsed.error?.issues[0]?.message ?? "Check the book details.");
@@ -163,7 +169,8 @@ export async function updateBookAction(bookId: string, input: BookDetailsInput):
 
 /** A book's full details, fetched when the library list opens its edit form. */
 export async function bookForEditAction(bookId: string): Promise<ActionResult<{ book: Awaited<ReturnType<typeof getBookForEdit>> }>> {
-  const { teacherId } = await requireTeacher();
+  const classroom = await requireClassroom();
+  const { teacherId } = classroom;
   if (!id.safeParse(bookId).success) return fail("That book wasn't found.");
   try {
     return ok({ book: await getBookForEdit(getDb(), teacherId, bookId) });
@@ -173,9 +180,11 @@ export async function bookForEditAction(bookId: string): Promise<ActionResult<{ 
 }
 
 export async function deleteBookAction(bookId: string): Promise<ActionResult> {
-  const { teacherId } = await requireTeacher();
+  const classroom = await requireClassroom();
+  const { teacherId } = classroom;
   if (!id.safeParse(bookId).success) return fail("That book wasn't found.");
   try {
+    assertOwner(classroom, "delete books from this library");
     await deleteBook(getDb(), teacherId, bookId);
     revalidateLibrary();
     return ok();
@@ -185,9 +194,11 @@ export async function deleteBookAction(bookId: string): Promise<ActionResult> {
 }
 
 export async function setBookLendableAction(bookId: string, lendable: boolean): Promise<ActionResult> {
-  const { teacherId } = await requireTeacher();
+  const classroom = await requireClassroom();
+  const { teacherId } = classroom;
   if (!id.safeParse(bookId).success) return fail("That book wasn't found.");
   try {
+    assertOwner(classroom, "change what this library lends");
     await setBookLendable(getDb(), teacherId, bookId, Boolean(lendable));
     revalidateLibrary(bookId);
     revalidatePath("/lending", "layout");
@@ -198,7 +209,8 @@ export async function setBookLendableAction(bookId: string, lendable: boolean): 
 }
 
 export async function addCopyAction(bookId: string): Promise<ActionResult<{ totalCopies: number }>> {
-  const { teacherId } = await requireTeacher();
+  const classroom = await requireClassroom();
+  const { teacherId } = classroom;
   if (!id.safeParse(bookId).success) return fail("That book wasn't found.");
   try {
     const { totalCopies } = await addCopies(getDb(), teacherId, bookId);
@@ -210,10 +222,12 @@ export async function addCopyAction(bookId: string): Promise<ActionResult<{ tota
 }
 
 export async function setCopyStatusAction(bookId: string, copyId: string, status: string): Promise<ActionResult> {
-  const { teacherId } = await requireTeacher();
+  const classroom = await requireClassroom();
+  const { teacherId } = classroom;
   const parsedStatus = z.enum(manualCopyStatuses).safeParse(status);
   if (!id.safeParse(copyId).success || !parsedStatus.success) return fail("That copy wasn't found.");
   try {
+    if (parsedStatus.data === "withdrawn") assertOwner(classroom, "withdraw copies from this library");
     await setCopyStatus(getDb(), teacherId, copyId, parsedStatus.data);
     revalidateLibrary(bookId);
     return ok();
@@ -223,9 +237,11 @@ export async function setCopyStatusAction(bookId: string, copyId: string, status
 }
 
 export async function deleteCopyAction(bookId: string, copyId: string): Promise<ActionResult> {
-  const { teacherId } = await requireTeacher();
+  const classroom = await requireClassroom();
+  const { teacherId } = classroom;
   if (!id.safeParse(copyId).success) return fail("That copy wasn't found.");
   try {
+    assertOwner(classroom, "delete copies from this library");
     await deleteCopy(getDb(), teacherId, copyId);
     revalidateLibrary(bookId);
     return ok();
@@ -246,7 +262,8 @@ export type ShelfScanActionResult =
  * like any other scan. The photo is never written to disk or to the database.
  */
 export async function scanShelfAction(formData: FormData): Promise<ShelfScanActionResult> {
-  const { teacherId } = await requireTeacher();
+  const classroom = await requireClassroom();
+  const { teacherId } = classroom;
   if (!shelfScanConfigured()) return { status: "unconfigured" };
 
   const photo = checkPhoto(formData.get("photo"));

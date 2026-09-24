@@ -2,6 +2,7 @@ import { and, asc, count, desc, eq, ilike, isNotNull, isNull, max, or, type SQL,
 import type { Database } from "@/db/client";
 import { books, type CopyStatus, copies, loans, type MetadataSource, students } from "@/db/schema";
 import { normalizeIsbn } from "@/lib/isbn";
+import { inScope } from "./coteaching";
 import { ConflictError, isUniqueViolation, NotFoundError } from "./errors";
 import type { BookMetadata } from "./isbn-lookup";
 import { assertNotInShelfLoan } from "./lending";
@@ -429,7 +430,13 @@ export async function getBookForEdit(db: Database, teacherId: string, bookId: st
   return book;
 }
 
-export async function getBookDetail(db: Database, teacherId: string, bookId: string) {
+/**
+ * A book, its copies and its checkout history. With `classIds` (a co-teacher's shared
+ * classes), a copy out to a student in any other class still shows as checked out, since
+ * it isn't on the shelf, but without the student: `borrowerHidden` is set and the name,
+ * link and loan are dropped. History lists only the shared classes' students.
+ */
+export async function getBookDetail(db: Database, teacherId: string, bookId: string, classIds: readonly string[] | null = null) {
   const [book] = await db
     .select()
     .from(books)
@@ -447,6 +454,7 @@ export async function getBookDetail(db: Database, teacherId: string, bookId: str
         studentId: students.id,
         studentFirstName: students.firstName,
         studentLastName: students.lastName,
+        studentClassId: students.classId,
         checkedOutAt: loans.checkedOutAt,
         dueOn: loans.dueOn,
       })
@@ -471,12 +479,18 @@ export async function getBookDetail(db: Database, teacherId: string, bookId: str
       .from(loans)
       .leftJoin(copies, eq(copies.id, loans.copyId))
       .innerJoin(students, eq(students.id, loans.studentId))
-      .where(and(eq(loans.bookId, bookId), eq(loans.teacherId, teacherId)))
+      .where(and(eq(loans.bookId, bookId), eq(loans.teacherId, teacherId), inScope(students.classId, classIds)))
       .orderBy(desc(loans.checkedOutAt))
       .limit(50),
   ]);
 
-  return { book, copies: copyRows, history };
+  const visible = (classId: string | null) => classIds == null || (classId !== null && classIds.includes(classId));
+  const copiesSeen = copyRows.map(({ studentClassId, ...copy }) =>
+    copy.loanId && !visible(studentClassId)
+      ? { ...copy, loanId: null, studentId: null, studentFirstName: null, studentLastName: null, borrowerHidden: true }
+      : { ...copy, borrowerHidden: false },
+  );
+  return { book, copies: copiesSeen, history };
 }
 
 export type BookDetail = Awaited<ReturnType<typeof getBookDetail>>;

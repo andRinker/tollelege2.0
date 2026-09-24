@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { type ReactNode, useState } from "react";
 import { Button as AriaButton, Header, MenuSection } from "react-aria-components";
 import { authClient } from "@/lib/auth-client";
+import { switchClassroomAction } from "@/app/(app)/classes/coteacher-actions";
 import { revokeAllPairingsAction } from "@/app/(app)/library/add/pairing-actions";
 import { cx } from "@/ui/cx";
 import { BrandMark } from "@/ui/components/brand";
@@ -24,20 +25,83 @@ import {
   iconSwapVert,
 } from "@/ui/icons/generated";
 
-function destinations(lendingWaiting: number): NavDestination[] {
+function destinations(lendingWaiting: number, coTeaching: boolean): NavDestination[] {
   return [
     { href: "/dashboard", label: "Home", icon: iconHome },
     { href: "/library", label: "Library", icon: iconLocalLibrary },
     { href: "/checkout", label: "Check out", icon: iconOutput },
     { href: "/checkin", label: "Check in", icon: iconInput },
     { href: "/classes", label: "Classes", icon: iconGroups },
-    {
-      href: "/lending",
-      label: "Lending",
-      icon: iconSwapVert,
-      badge: { count: lendingWaiting, label: `${lendingWaiting} waiting for you` },
-    },
+    // Lending between teachers is the classroom owner's to manage, so it isn't offered in
+    // a classroom you only co-teach.
+    ...(coTeaching
+      ? []
+      : [
+          {
+            href: "/lending",
+            label: "Lending",
+            icon: iconSwapVert,
+            badge: { count: lendingWaiting, label: `${lendingWaiting} waiting for you` },
+          },
+        ]),
   ];
+}
+
+export type ClassroomChoice = { ownerId: string; ownerName: string; classNames: string[] };
+
+function possessive(name: string) {
+  return name.endsWith("s") ? `${name}\u2019` : `${name}\u2019s`;
+}
+
+/** Moves this browser between your own classroom and ones shared with you. */
+function useSwitchClassroom() {
+  const router = useRouter();
+  const showSnackbar = useSnackbar();
+  return async (ownerId: string | null) => {
+    const result = await switchClassroomAction(ownerId);
+    if (!result.ok) showSnackbar({ message: result.message });
+    router.replace("/dashboard");
+    router.refresh();
+  };
+}
+
+function ClassroomSwitcher({ classrooms, current }: { classrooms: ClassroomChoice[]; current: string | null }) {
+  const switchTo = useSwitchClassroom();
+  const here = classrooms.find((room) => room.ownerId === current);
+  return (
+    <MenuTrigger>
+      <Button variant="tonal" size="xs" icon={iconGroups}>
+        {here ? `${possessive(here.ownerName)} classroom` : "Your classroom"}
+      </Button>
+      <Menu
+        selectionMode="single"
+        selectedKeys={[current ?? "own"]}
+        onAction={(key) => void switchTo(key === "own" ? null : String(key))}
+      >
+        <MenuItem id="own">Your classroom</MenuItem>
+        {classrooms.map((room) => (
+          <MenuItem key={room.ownerId} id={room.ownerId}>
+            {`${possessive(room.ownerName)} classroom \u00b7 ${room.classNames.join(", ")}`}
+          </MenuItem>
+        ))}
+      </Menu>
+    </MenuTrigger>
+  );
+}
+
+/** On screen whenever you're working in someone else's classroom. */
+function ClassroomStrip({ room }: { room: ClassroomChoice }) {
+  const switchTo = useSwitchClassroom();
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl bg-secondary-container px-4 py-2 text-on-secondary-container">
+      <span className="grow text-body-md">
+        {`You're working in ${possessive(room.ownerName)} classroom: ${room.classNames.join(", ")}. What you add or change is theirs.`}
+      </span>
+      <Button variant="text" size="xs" onPress={() => void switchTo(null)}>
+        Back to your classroom
+      </Button>
+    </div>
+  );
 }
 
 function footerDestinations(isAdmin: boolean): NavDestination[] {
@@ -124,6 +188,10 @@ type AppShellProps = {
   /** Lending requests and invitations waiting on this teacher. */
   lendingWaiting: number;
   isAdmin: boolean;
+  /** Classrooms shared with this teacher, for the switcher. Empty hides it. */
+  classrooms: ClassroomChoice[];
+  /** The owner whose classroom this browser is in, or null for your own. */
+  currentClassroom: string | null;
   /** When an admin is acting as this teacher, the time it lapses, already formatted. */
   actingUntil: string | null;
   children: ReactNode;
@@ -164,9 +232,19 @@ function ActingBanner({ teacher, until }: { teacher: Teacher; until: string }) {
   );
 }
 
-export function AppShell({ teacher, railExpanded, lendingWaiting, isAdmin, actingUntil, children }: AppShellProps) {
+export function AppShell({
+  teacher,
+  railExpanded,
+  lendingWaiting,
+  isAdmin,
+  classrooms,
+  currentClassroom,
+  actingUntil,
+  children,
+}: AppShellProps) {
   const [expanded, setExpanded] = useState(railExpanded);
-  const DESTINATIONS = destinations(lendingWaiting);
+  const DESTINATIONS = destinations(lendingWaiting, currentClassroom !== null);
+  const room = classrooms.find((choice) => choice.ownerId === currentClassroom);
 
   function toggleRail() {
     const next = !expanded;
@@ -192,11 +270,21 @@ export function AppShell({ teacher, railExpanded, lendingWaiting, isAdmin, actin
         <header className="sticky top-0 z-20 flex h-16 items-center gap-2 bg-surface/95 pr-2 pl-4 backdrop-blur medium:bg-transparent medium:backdrop-blur-none medium:pointer-events-none">
           <BrandMark className="text-primary medium:hidden" />
           <span className="grow" />
+          {classrooms.length > 0 && (
+            <span className="medium:pointer-events-auto medium:pt-4">
+              <ClassroomSwitcher classrooms={classrooms} current={currentClassroom} />
+            </span>
+          )}
           <span className="medium:pointer-events-auto medium:pt-4">
             <AccountMenu teacher={teacher} isAdmin={isAdmin} acting={actingUntil !== null} />
           </span>
         </header>
         <main className="mx-auto w-full max-w-[1280px] grow px-4 pb-[calc(96px+env(safe-area-inset-bottom))] medium:-mt-16 medium:px-8 medium:pb-12 expanded:px-12">
+          {room && (
+            <div className="pb-2 medium:pt-20">
+              <ClassroomStrip room={room} />
+            </div>
+          )}
           {children}
         </main>
       </div>
