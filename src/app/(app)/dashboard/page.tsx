@@ -6,10 +6,12 @@ import { getDb } from "@/db/client";
 import { describeDueDate, formatRecentInstant, hourInTimeZone, todayInTimeZone } from "@/lib/dates";
 import { catalogSummary } from "@/server/catalog";
 import { type ActivityItem, circulationStats, listOpenLoans, recentActivity } from "@/server/circulation";
+import { pendingHandoversTo } from "@/server/handover";
 import { rosterCounts } from "@/server/roster";
 import { requireClassroom, requireTeacher } from "@/server/session";
 import { getRequestSettings } from "@/server/theme";
 import { cx } from "@/ui/cx";
+import { HandoverOffers } from "./handover-offers";
 import { LinkButton } from "@/ui/components/button";
 import { PageHeader, Shape } from "@/ui/components/expressive";
 import { Icon } from "@/ui/components/icon";
@@ -56,12 +58,14 @@ export default async function DashboardPage() {
   const today = todayInTimeZone(settings.timeZone);
   const db = getDb();
   const { teacherId, classIds } = classroom;
-  const [stats, catalog, roster, overdueLoans, activity] = await Promise.all([
+  const [stats, catalog, roster, overdueLoans, activity, offers] = await Promise.all([
     circulationStats(db, teacherId, today, settings.timeZone ?? "UTC", classIds),
     catalogSummary(db, teacherId),
     rosterCounts(db, teacherId, classIds),
     listOpenLoans(db, teacherId, { today, overdueOnly: true, limit: OVERDUE_PREVIEW, classIds }),
     recentActivity(db, teacherId, 8, classIds),
+    // Offered to the signed-in teacher's own account, whichever classroom they're in.
+    pendingHandoversTo(db, teacher.teacherId),
   ]);
 
   const firstName = teacher.name.split(/\s+/)[0];
@@ -92,6 +96,11 @@ export default async function DashboardPage() {
       <PageHeader title={`${greeting(hourInTimeZone(settings.timeZone))}, ${firstName}`} subtitle={summary} />
 
       <div className="flex flex-col gap-8 pb-8">
+        {offers.length > 0 && (
+          <HandoverOffers
+            offers={offers.map(({ id, fromName, classNames, books }) => ({ id, fromName, classNames, books }))}
+          />
+        )}
         {settingUp && (
           <section aria-labelledby="get-started" className="flex flex-col gap-4 rounded-xl bg-surface-container-low p-4 medium:p-6">
             <h2 id="get-started" className="text-title-lg-em">

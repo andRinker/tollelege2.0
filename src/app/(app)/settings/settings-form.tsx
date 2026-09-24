@@ -7,7 +7,7 @@ import { readingLevelSystems, type ReadingLevelSystem, type ThemeContrast, type 
 import { authClient } from "@/lib/auth-client";
 import type { TeacherSettings } from "@/server/settings";
 import { cx } from "@/ui/cx";
-import { Button } from "@/ui/components/button";
+import { Button, LinkButton } from "@/ui/components/button";
 import { ConnectedButton, ConnectedButtonGroup } from "@/ui/components/button-group";
 import { Icon } from "@/ui/components/icon";
 import { ListBoxItem } from "@/ui/components/menu";
@@ -20,6 +20,7 @@ import {
   iconDarkMode,
   iconLightMode,
   iconLogout,
+  iconMoveItem,
   iconPalette,
   iconSync,
 } from "@/ui/icons/generated";
@@ -223,6 +224,15 @@ export function SettingsForm({ settings, teacher, timeZones }: Props) {
           >
             {(item) => <ListBoxItem id={item.id}>{item.name}</ListBoxItem>}
           </Select>
+        </SettingsSection>
+
+        <SettingsSection
+          title="Hand over"
+          description="Give classes and books to another teacher. They accept before anything moves, and you stay on as a co-teacher of any class you hand over."
+        >
+          <LinkButton href="/settings/hand-over" variant="tonal" icon={iconMoveItem} className="self-start">
+            Hand over classes or books
+          </LinkButton>
         </SettingsSection>
 
         <SettingsSection title="Account">

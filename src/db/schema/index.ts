@@ -5,6 +5,7 @@ export * from "./catalog";
 export * from "./circulation";
 export * from "./coteaching";
 export * from "./enums";
+export * from "./handover";
 export * from "./isbn-cache";
 export * from "./lending";
 export * from "./relations";
