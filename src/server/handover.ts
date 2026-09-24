@@ -1,4 +1,4 @@
-import { and, arrayContains, asc, count, eq, inArray, isNotNull, isNull, max, not, notInArray, or, type SQL, sql } from "drizzle-orm";
+import { and, arrayContains, asc, count, eq, inArray, isNotNull, isNull, max, ne, not, notInArray, or, type SQL, sql } from "drizzle-orm";
 import { alias, type PgColumn } from "drizzle-orm/pg-core";
 import type { Database } from "@/db/client";
 import {
@@ -146,6 +146,25 @@ async function resolvePicked(
   return moving;
 }
 
+/** Every class and every book the teacher has right now. */
+async function entireLibrary(db: Database, teacherId: string): Promise<Moving & { classIds: string[] }> {
+  const [classRows, bookRows] = await Promise.all([
+    db.select({ id: classes.id }).from(classes).where(eq(classes.teacherId, teacherId)),
+    db.select({ id: books.id }).from(books).where(eq(books.teacherId, teacherId)),
+  ]);
+  return { classIds: classRows.map((row) => row.id), bookIds: bookRows.map((row) => row.id), copyIds: [] };
+}
+
+/** What an offer covers now: what it named, or for "everything", the library as it stands. */
+async function offerContents(
+  db: Database,
+  fromId: string,
+  offer: { everything: boolean; classIds: string[]; bookIds: string[]; copyIds: string[] },
+): Promise<Moving & { classIds: string[] }> {
+  if (offer.everything) return entireLibrary(db, fromId);
+  return { classIds: offer.classIds, bookIds: offer.bookIds, copyIds: offer.copyIds };
+}
+
 /** How many titles and copies an offer moves, counted as the libraries stand now. */
 async function countMoving(db: Database, fromId: string, moving: Moving): Promise<{ books: number; copies: number }> {
   const [whole, rows] = await Promise.all([
@@ -162,21 +181,30 @@ async function countMoving(db: Database, fromId: string, moving: Moving): Promis
 }
 
 export type OfferOutcome =
-  | { status: "sent"; recipientName: string; classes: number; books: number; copies: number }
+  | {
+      status: "sent";
+      /** Null while the offer waits for a colleague who hasn't signed in yet. */
+      recipientName: string | null;
+      email: string;
+      classes: number;
+      books: number;
+      copies: number;
+    }
   | { status: "blocked"; problems: string[] };
 
 /**
  * Offers classes and books to the teacher with `rawEmail`. Refused up front if accepting
  * would be, so the owner sorts it out before the recipient ever sees it.
  *
- * The recipient needs an account with a verified email (Google, or one an admin created),
- * for the same reason a co-teacher does: this hands over student names, and an unverified
- * address could be anyone's.
+ * Only an account with a verified email (Google, or one an admin created) can take it, for
+ * the same reason as a co-teacher: this hands over student names, and an unverified
+ * address could be anyone's. For anyone else the offer waits on the email, and is claimed
+ * by the first verified sign-in with it (`claimHandovers`), exactly like a co-teacher invite.
  */
 export async function offerHandover(
   db: Database,
   fromId: string,
-  input: { email: string; classIds: string[]; books: BookSelection },
+  input: { email: string; classIds: string[]; books: BookSelection; everything?: boolean },
 ): Promise<OfferOutcome> {
   const email = input.email.trim().toLowerCase();
   const [recipient] = await db
@@ -184,11 +212,7 @@ export async function offerHandover(
     .from(user)
     .where(eq(user.email, email));
   if (recipient?.id === fromId) throw new ConflictError("That's you. Choose the teacher who's taking over.");
-  if (!recipient?.emailVerified) {
-    throw new ConflictError(
-      "That email doesn't have an account that can take this yet. Ask them to sign in with Google first, then try again.",
-    );
-  }
+  const toId = recipient?.emailVerified ? recipient.id : null;
 
   const [pending] = await db
     .select({ id: handovers.id })
@@ -196,30 +220,51 @@ export async function offerHandover(
     .where(and(eq(handovers.fromTeacherId, fromId), eq(handovers.status, "pending")));
   if (pending) throw new ConflictError("You already have a hand-over waiting. Withdraw it before offering another.");
 
-  const classIds = (
-    await db
-      .select({ id: classes.id })
-      .from(classes)
-      .where(and(eq(classes.teacherId, fromId), inList(classes.id, input.classIds)))
-  ).map((row) => row.id);
-  const moving = await resolveBooks(db, fromId, input.books);
+  const everything = Boolean(input.everything);
+  const { classIds, ...moving } = everything
+    ? await entireLibrary(db, fromId)
+    : {
+        classIds: (
+          await db
+            .select({ id: classes.id })
+            .from(classes)
+            .where(and(eq(classes.teacherId, fromId), inList(classes.id, input.classIds)))
+        ).map((row) => row.id),
+        ...(await resolveBooks(db, fromId, input.books)),
+      };
   if (classIds.length === 0 && moving.bookIds.length === 0 && moving.copyIds.length === 0) {
-    throw new ConflictError("Choose at least one class or book to hand over.");
+    throw new ConflictError(everything ? "Your library is empty, so there's nothing to hand over." : "Choose at least one class or book to hand over.");
   }
 
-  const problems = await findProblems(db, fromId, recipient.id, classIds, moving);
+  const problems = await findProblems(db, fromId, toId, classIds, moving);
   if (problems.length > 0) return { status: "blocked", problems };
 
-  await db.insert(handovers).values({ fromTeacherId: fromId, toTeacherId: recipient.id, classIds, ...moving });
-  return { status: "sent", recipientName: recipient.name, classes: classIds.length, ...(await countMoving(db, fromId, moving)) };
+  // "Everything" is stored as such, and resolved again when it's accepted.
+  await db
+    .insert(handovers)
+    .values(
+      everything
+        ? { fromTeacherId: fromId, toTeacherId: toId, toEmail: email, everything }
+        : { fromTeacherId: fromId, toTeacherId: toId, toEmail: email, classIds, ...moving },
+    );
+  return {
+    status: "sent",
+    recipientName: toId ? recipient!.name : null,
+    email,
+    classes: classIds.length,
+    ...(await countMoving(db, fromId, moving)),
+  };
 }
 
 export type HandoverSummary = {
   id: string;
   fromName: string;
-  toName: string;
+  /** Null while the offer waits for a colleague who hasn't signed in yet. */
+  toName: string | null;
   toEmail: string;
   classNames: string[];
+  /** The sender's entire library, whatever it holds when accepted. */
+  everything: boolean;
   /** Titles, whole or in part. */
   books: number;
   copies: number;
@@ -235,35 +280,39 @@ async function summarise(db: Database, where: SQL): Promise<HandoverSummary[]> {
       fromId: handovers.fromTeacherId,
       fromName: sender.name,
       toName: recipient.name,
-      toEmail: recipient.email,
+      recipientEmail: recipient.email,
+      addressedTo: handovers.toEmail,
       classIds: handovers.classIds,
       bookIds: handovers.bookIds,
       copyIds: handovers.copyIds,
+      everything: handovers.everything,
       createdAt: handovers.createdAt,
     })
     .from(handovers)
     .innerJoin(sender, eq(sender.id, handovers.fromTeacherId))
-    .innerJoin(recipient, eq(recipient.id, handovers.toTeacherId))
+    .leftJoin(recipient, eq(recipient.id, handovers.toTeacherId))
     .where(and(eq(handovers.status, "pending"), where))
     .orderBy(asc(handovers.createdAt));
 
   // Counted live, so what the recipient is told matches what accepting would move.
   return Promise.all(
     offers.map(async (offer) => {
+      const contents = await offerContents(db, offer.fromId, offer);
       const [classRows, moving] = await Promise.all([
         db
           .select({ name: classes.name })
           .from(classes)
-          .where(and(eq(classes.teacherId, offer.fromId), inList(classes.id, offer.classIds)))
+          .where(and(eq(classes.teacherId, offer.fromId), inList(classes.id, contents.classIds)))
           .orderBy(asc(classes.name)),
-        countMoving(db, offer.fromId, { bookIds: offer.bookIds, copyIds: offer.copyIds }),
+        countMoving(db, offer.fromId, contents),
       ]);
       return {
         id: offer.id,
         fromName: offer.fromName,
         toName: offer.toName,
-        toEmail: offer.toEmail,
+        toEmail: offer.addressedTo ?? offer.recipientEmail ?? "",
         classNames: classRows.map((row) => row.name),
+        everything: offer.everything,
         ...moving,
         createdAt: offer.createdAt,
       };
@@ -280,6 +329,30 @@ export async function pendingHandoverFrom(db: Database, fromId: string): Promise
 /** Offers waiting for this teacher to accept or decline. */
 export async function pendingHandoversTo(db: Database, toId: string): Promise<HandoverSummary[]> {
   return summarise(db, eq(handovers.toTeacherId, toId));
+}
+
+/**
+ * Gives a waiting offer to the teacher it was addressed to, the first time they're signed
+ * in with that email verified. Called from the app layout, like `claimCoTeacherInvites`.
+ */
+export async function claimHandovers(
+  db: Database,
+  account: { id: string; email: string; emailVerified: boolean },
+): Promise<number> {
+  if (!account.emailVerified) return 0;
+  const claimed = await db
+    .update(handovers)
+    .set({ toTeacherId: account.id })
+    .where(
+      and(
+        eq(handovers.toEmail, account.email.toLowerCase()),
+        isNull(handovers.toTeacherId),
+        eq(handovers.status, "pending"),
+        ne(handovers.fromTeacherId, account.id),
+      ),
+    )
+    .returning({ id: handovers.id });
+  return claimed.length;
 }
 
 export async function withdrawHandover(db: Database, fromId: string, handoverId: string): Promise<void> {
@@ -318,6 +391,7 @@ export async function acceptHandover(db: Database, toId: string, handoverId: str
           classIds: handovers.classIds,
           bookIds: handovers.bookIds,
           copyIds: handovers.copyIds,
+          everything: handovers.everything,
         })
         .from(handovers)
         .innerJoin(user, eq(user.id, handovers.fromTeacherId))
@@ -325,6 +399,7 @@ export async function acceptHandover(db: Database, toId: string, handoverId: str
         .for("update", { of: handovers });
       if (!offer) throw new NotFoundError("That hand-over has already been answered or withdrawn.");
       const { fromId, fromName } = offer;
+      Object.assign(offer, await offerContents(tx, fromId, offer));
 
       // Lock what's moving, so nothing is checked out or edited between the checks and the move.
       const classIds = (
@@ -553,7 +628,8 @@ const MAX_PROBLEMS = 8;
 async function findProblems(
   db: Database,
   fromId: string,
-  toId: string,
+  /** Null for an offer still waiting on an email: it has no students yet to clash with. */
+  toId: string | null,
   classIds: string[],
   moving: Moving,
 ): Promise<string[]> {
@@ -636,7 +712,7 @@ async function findProblems(
   }
 
   // Student ID numbers the recipient already uses.
-  if (classIds.length > 0) {
+  if (classIds.length > 0 && toId) {
     const theirStudents = alias(students, "their_students");
     const clashes = await db
       .select({ studentNumber: students.studentNumber, firstName: students.firstName, lastName: students.lastName })

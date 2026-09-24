@@ -8,7 +8,7 @@ import { useSnackbar } from "@/ui/components/snackbar";
 import { iconMoveItem } from "@/ui/icons/generated";
 import { acceptHandoverAction, declineHandoverAction } from "../settings/handover-actions";
 
-type Offer = { id: string; fromName: string; classNames: string[]; books: number; copies: number };
+type Offer = { id: string; fromName: string; classNames: string[]; everything: boolean; books: number; copies: number };
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
@@ -19,7 +19,8 @@ function describe(offer: Offer) {
   const books = offer.books
     ? plural(offer.books, "book") + (offer.copies > offer.books ? ` (${plural(offer.copies, "copy", "copies")})` : "")
     : null;
-  return [classes, books].filter(Boolean).join(", and ");
+  const what = [classes, books].filter(Boolean).join(", and ");
+  return offer.everything ? `their entire library: ${what}` : what;
 }
 
 /** Classes and books another teacher wants to hand to this one. */

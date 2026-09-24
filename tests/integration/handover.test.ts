@@ -7,6 +7,7 @@ import { addCoTeacher, resolveClassroom } from "@/server/coteaching";
 import { ConflictError, NotFoundError } from "@/server/errors";
 import {
   acceptHandover,
+  claimHandovers,
   declineHandover,
   offerHandover,
   pendingHandoverFrom,
@@ -127,13 +128,77 @@ describe("handing over classes and books", () => {
       ]);
     });
 
-    it("an address that isn't verified, yourself, or a second offer while one waits", async () => {
-      await db.update(user).set({ emailVerified: false }).where(eq(user.id, dan));
-      await expect(offer()).rejects.toThrow(/sign in with Google first/);
-      await db.update(user).set({ emailVerified: true }).where(eq(user.id, dan));
+    it("yourself, or a second offer while one waits", async () => {
       await expect(offer("alvarez@augprep.org")).rejects.toBeInstanceOf(ConflictError);
       expect(await offer()).toMatchObject({ status: "sent", recipientName: "Dan Brooks", classes: 1, books: 2 });
       await expect(offer()).rejects.toThrow(/already have a hand-over waiting/);
+    });
+  });
+
+  describe("waiting for a colleague who hasn't signed up", () => {
+    it("waits on the email, and goes to the first verified sign-in with it", async () => {
+      expect(await offer(" New.Teacher@AugPrep.org ")).toMatchObject({ status: "sent", recipientName: null, email: "new.teacher@augprep.org" });
+      expect(await pendingHandoverFrom(db, maria)).toMatchObject({ toName: null, toEmail: "new.teacher@augprep.org", books: 2 });
+
+      const newcomer = await createTeacher(db, "New Teacher", "new.teacher@augprep.org");
+      expect(await pendingHandoversTo(db, newcomer)).toEqual([]);
+      expect(await claimHandovers(db, { id: newcomer, email: "New.Teacher@augprep.org", emailVerified: true })).toBe(1);
+      const [waiting] = await pendingHandoversTo(db, newcomer);
+      expect(waiting).toMatchObject({ fromName: "Maria Alvarez", classNames: ["Room 12"], toName: "New Teacher" });
+      expect(await acceptHandover(db, newcomer, waiting.id)).toMatchObject({ status: "accepted", classes: 1, books: 2 });
+      expect((await db.select({ teacherId: classes.teacherId }).from(classes).where(eq(classes.id, room12)))[0].teacherId).toBe(newcomer);
+    });
+
+    it("never goes to an unverified account, which could be anyone's", async () => {
+      await db.update(user).set({ emailVerified: false }).where(eq(user.id, dan));
+      expect(await offer()).toMatchObject({ status: "sent", recipientName: null });
+      expect(await claimHandovers(db, { id: dan, email: "dan@augprep.org", emailVerified: false })).toBe(0);
+      expect(await pendingHandoversTo(db, dan)).toEqual([]);
+
+      // Once the address is proven, it's theirs.
+      expect(await claimHandovers(db, { id: dan, email: "dan@augprep.org", emailVerified: true })).toBe(1);
+      expect(await pendingHandoversTo(db, dan)).toHaveLength(1);
+    });
+
+    it("checks a student ID clash when accepting, once there's a roster to clash with", async () => {
+      await offer("new.teacher@augprep.org");
+      const newcomer = await createTeacher(db, "New Teacher", "new.teacher@augprep.org");
+      await db.insert(students).values({ teacherId: newcomer, firstName: "Zed", studentNumber: "100" });
+      await claimHandovers(db, { id: newcomer, email: "new.teacher@augprep.org", emailVerified: true });
+      const [waiting] = await pendingHandoversTo(db, newcomer);
+      expect(await acceptHandover(db, newcomer, waiting.id)).toMatchObject({
+        status: "blocked",
+        problems: [expect.stringMatching(/Ben Ortiz's student ID, 100/)],
+      });
+    });
+
+    it("the entire library, including whatever was added while it waited", async () => {
+      const outcome = await offerHandover(db, maria, {
+        email: "new.teacher@augprep.org",
+        classIds: [],
+        books: { kind: "none" },
+        everything: true,
+      });
+      expect(outcome).toMatchObject({ status: "sent", classes: 2, books: 3 });
+      const added = await book("9780439023528", "The Hunger Games", [], maria); // after the offer
+
+      const newcomer = await createTeacher(db, "New Teacher", "new.teacher@augprep.org");
+      await claimHandovers(db, { id: newcomer, email: "new.teacher@augprep.org", emailVerified: true });
+      const [waiting] = await pendingHandoversTo(db, newcomer);
+      expect(waiting).toMatchObject({ everything: true, classNames: ["Room 12", "Room 14"], books: 4 });
+      expect(await acceptHandover(db, newcomer, waiting.id)).toMatchObject({ status: "accepted", classes: 2, books: 4 });
+
+      expect(await db.select().from(books).where(eq(books.teacherId, maria))).toEqual([]);
+      expect(await db.select().from(classes).where(eq(classes.teacherId, maria))).toEqual([]);
+      expect((await db.select({ teacherId: books.teacherId }).from(books).where(eq(books.id, added.bookId)))[0].teacherId).toBe(newcomer);
+    });
+
+    it("can be withdrawn before anyone claims it", async () => {
+      await offer("new.teacher@augprep.org");
+      const pending = await pendingHandoverFrom(db, maria);
+      await withdrawHandover(db, maria, pending!.id);
+      const newcomer = await createTeacher(db, "New Teacher", "new.teacher@augprep.org");
+      expect(await claimHandovers(db, { id: newcomer, email: "new.teacher@augprep.org", emailVerified: true })).toBe(0);
     });
   });
 

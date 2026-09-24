@@ -25,7 +25,8 @@ type Choices = {
 function Section({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
   return (
     <section className="flex flex-col gap-4 rounded-xl bg-surface-container-low p-5 medium:p-6 [--field-bg:var(--md-sys-color-surface-container-low)]">
-      <div className="flex flex-col gap-1">
+      {/* A long email address has no spaces to wrap at, and would push a phone's page sideways. */}
+      <div className="flex min-w-0 flex-col gap-1 [overflow-wrap:anywhere]">
         <h2 className="text-title-lg-em">{title}</h2>
         {description && <p className="text-body-md text-on-surface-variant">{description}</p>}
       </div>
@@ -40,6 +41,8 @@ export function HandoverForm({ choices }: { choices: Choices }) {
   const router = useRouter();
   const showSnackbar = useSnackbar();
   const [email, setEmail] = useState("");
+  // "My entire library": every class, archived ones too, and every book.
+  const [everything, setEverything] = useState(false);
   const [classIds, setClassIds] = useState<string[]>([]);
   const [bookKind, setBookKind] = useState<BookSelection["kind"]>("none");
   const [tag, setTag] = useState<string | null>(null);
@@ -86,20 +89,22 @@ export function HandoverForm({ choices }: { choices: Choices }) {
     return { kind: bookKind };
   };
 
+  const allCopies = choices.books.reduce((sum, book) => sum + book.copies, 0);
+
   async function submit() {
     setError(null);
     setProblems([]);
-    const books = selection();
+    const books = everything ? { kind: "none" as const } : selection();
     if (!books) {
       setError(bookKind === "picked" ? "Choose at least one book." : `Choose a ${bookKind === "tag" ? "tag" : "bin or shelf"}.`);
       return;
     }
-    if (classIds.length === 0 && books.kind === "none") {
-      setError("Choose at least one class or book to hand over.");
+    if (everything ? choices.classes.length === 0 && choices.books.length === 0 : classIds.length === 0 && books.kind === "none") {
+      setError(everything ? "Your library is empty, so there's nothing to hand over." : "Choose at least one class or book to hand over.");
       return;
     }
     setPending(true);
-    const result = await offerHandoverAction({ email, classIds, books });
+    const result = await offerHandoverAction(everything ? { email, classIds: [], books, everything } : { email, classIds, books });
     setPending(false);
     if (!result.ok) {
       setError(result.message);
@@ -109,12 +114,20 @@ export function HandoverForm({ choices }: { choices: Choices }) {
       setProblems(result.data.problems);
       return;
     }
-    showSnackbar({ message: `Offered to ${result.data.recipientName}. Nothing moves until they accept.` });
+    const { recipientName, email: to } = result.data;
+    showSnackbar({
+      message: recipientName
+        ? `Offered to ${recipientName}. Nothing moves until they accept.`
+        : `Offered to ${to}. It'll be waiting for them when they first sign in with Google.`,
+    });
     router.refresh();
   }
 
-  const books = bookCount && plural(bookCount, "book") + (copyCount && copyCount > bookCount ? ` (${plural(copyCount, "copy", "copies")})` : "");
-  const summary = [classIds.length && plural(classIds.length, "class", "classes"), books]
+  const describeBooks = (titles: number, copies: number | null) =>
+    titles && plural(titles, "book") + (copies && copies > titles ? ` (${plural(copies, "copy", "copies")})` : "");
+  const books = everything ? describeBooks(choices.books.length, allCopies) : describeBooks(bookCount, copyCount);
+  const classCount = everything ? choices.classes.length : classIds.length;
+  const summary = [classCount && plural(classCount, "class", "classes"), books]
     .filter(Boolean)
     .join(" and ");
 
@@ -126,109 +139,142 @@ export function HandoverForm({ choices }: { choices: Choices }) {
       }}
       className="flex max-w-3xl flex-col gap-4"
     >
-      <Section title="Who's taking over" description="They need to have signed in with Google at least once, or have an account your administrator made for them.">
+      <Section
+        title="Who's taking over"
+        description="If they haven't signed up yet, the offer waits for them. They'll find it the first time they sign in with Google."
+      >
         <TextField label="Their school email" type="email" value={email} onChange={setEmail} isRequired autoComplete="off" leadingIcon={iconMail} />
       </Section>
 
-      <Section
-        title="Classes"
-        description="Each class takes its students and their reading history with it. You'll stay on as a co-teacher, and they can remove you."
-      >
-        {choices.classes.length === 0 ? (
-          <p className="text-body-md text-on-surface-variant">You have no classes.</p>
-        ) : (
-          <div className="flex flex-col">
-            {choices.classes.map((klass) => (
-              <Checkbox
-                key={klass.id}
-                isSelected={classIds.includes(klass.id)}
-                onChange={(on) => setClassIds((ids) => (on ? [...ids, klass.id] : ids.filter((id) => id !== klass.id)))}
-              >
-                <span>
-                  {klass.name}
-                  <span className="text-body-md text-on-surface-variant">
-                    {` · ${plural(klass.students, "student")} · ${klass.schoolYear}${klass.archived ? " · archived" : ""}`}
-                  </span>
-                </span>
-              </Checkbox>
-            ))}
-          </div>
+      <Section title="What to hand over">
+        <RadioGroup
+          aria-label="What to hand over"
+          value={everything ? "everything" : "choose"}
+          onChange={(value) => setEverything(value === "everything")}
+        >
+          <Radio value="everything">My entire library</Radio>
+          <Radio value="choose">Let me choose classes and books</Radio>
+        </RadioGroup>
+        {everything && (
+          <p className="text-body-md text-on-surface-variant">
+            {[
+              choices.classes.length > 0 &&
+                `Every class (${choices.classes.map((klass) => klass.name).join(", ")}), with their students and reading history`,
+              choices.books.length > 0 && `all ${describeBooks(choices.books.length, allCopies)}`,
+            ]
+              .filter(Boolean)
+              .join(", and ") || "Your library is empty"}
+            {choices.classes.length > 0
+              ? ". You'll stay on as a co-teacher of every class, and they can remove you. Students who aren't in a class stay with you."
+              : "."}
+            {" Anything you add before they accept goes too."}
+          </p>
         )}
       </Section>
 
-      <Section title="Books" description="Copies they already have join their copy of the title, so nothing is listed twice.">
-        <RadioGroup aria-label="Which books" value={bookKind} onChange={(value) => setBookKind(value as BookSelection["kind"])}>
-          <Radio value="none">No books</Radio>
-          <Radio value="all">{`All of them (${choices.books.length})`}</Radio>
-          <Radio value="tag" isDisabled={choices.tags.length === 0}>
-            With a tag
-          </Radio>
-          <Radio value="location" isDisabled={choices.locations.length === 0}>
-            In a bin or shelf
-          </Radio>
-          <Radio value="picked" isDisabled={choices.books.length === 0}>
-            Let me choose
-          </Radio>
-        </RadioGroup>
-        {bookKind === "tag" && (
-          <Select label="Tag" selectedKey={tag} onSelectionChange={(key) => setTag(key as string)} items={choices.tags.map((option) => ({ id: option.name, ...option }))}>
-            {(item) => <ListBoxItem id={item.id}>{`${item.name} (${item.books})`}</ListBoxItem>}
-          </Select>
-        )}
-        {bookKind === "location" && (
-          <Select
-            label="Bin or shelf"
-            selectedKey={location}
-            onSelectionChange={(key) => setLocation(key as string)}
-            items={choices.locations.map((option) => ({ id: option.name, ...option }))}
-          >
-            {(item) => <ListBoxItem id={item.id}>{`${item.name} (${item.books})`}</ListBoxItem>}
-          </Select>
-        )}
-        {bookKind === "picked" && (
-          <div className="flex flex-col gap-2">
-            <TextField label="Find a book" value={filter} onChange={setFilter} leadingIcon={iconSearch} autoComplete="off" />
-            <p className="text-body-sm text-on-surface-variant">
-              {`${plural(bookCount, "book")} chosen. For a title with several copies, choose how many to give; you keep the rest.`}
-            </p>
-            <div className="flex max-h-96 flex-col overflow-y-auto rounded-md bg-surface-container px-2">
-              {shown.map((book) => {
-                const chosen = picked[book.id];
-                return (
-                  <div key={book.id} className="flex min-h-12 items-center gap-2">
-                    <Checkbox
-                      className="min-w-0 grow"
-                      isSelected={chosen !== undefined}
-                      onChange={(on) =>
-                        setPicked((current) => {
-                          const next = { ...current };
-                          if (on) next[book.id] = book.copies;
-                          else delete next[book.id];
-                          return next;
-                        })
-                      }
-                    >
-                      <span className="truncate">
-                        {book.title}
-                        {book.authors.length > 0 && <span className="text-body-md text-on-surface-variant">{` · ${book.authors.join(", ")}`}</span>}
-                      </span>
-                    </Checkbox>
-                    {chosen !== undefined && book.copies > 1 && (
-                      <CopyStepper
-                        title={book.title}
-                        value={chosen}
-                        max={book.copies}
-                        onChange={(value) => setPicked((current) => ({ ...current, [book.id]: value }))}
-                      />
-                    )}
-                  </div>
-                );
-              })}
-              {shown.length === 0 && <p className="px-2 py-3 text-body-md text-on-surface-variant">No books match.</p>}
+      {!everything && (
+        <>
+        <Section
+          title="Classes"
+          description="Each class takes its students and their reading history with it. You'll stay on as a co-teacher, and they can remove you."
+        >
+          {choices.classes.length === 0 ? (
+            <p className="text-body-md text-on-surface-variant">You have no classes.</p>
+          ) : (
+            <div className="flex flex-col">
+              {choices.classes.map((klass) => (
+                <Checkbox
+                  key={klass.id}
+                  isSelected={classIds.includes(klass.id)}
+                  onChange={(on) => setClassIds((ids) => (on ? [...ids, klass.id] : ids.filter((id) => id !== klass.id)))}
+                >
+                  <span>
+                    {klass.name}
+                    <span className="text-body-md text-on-surface-variant">
+                      {` · ${plural(klass.students, "student")} · ${klass.schoolYear}${klass.archived ? " · archived" : ""}`}
+                    </span>
+                  </span>
+                </Checkbox>
+              ))}
             </div>
-          </div>
-        )}
-      </Section>
+          )}
+        </Section>
+
+        <Section title="Books" description="Copies they already have join their copy of the title, so nothing is listed twice.">
+          <RadioGroup aria-label="Which books" value={bookKind} onChange={(value) => setBookKind(value as BookSelection["kind"])}>
+            <Radio value="none">No books</Radio>
+            <Radio value="all">{`All of them (${choices.books.length})`}</Radio>
+            <Radio value="tag" isDisabled={choices.tags.length === 0}>
+              With a tag
+            </Radio>
+            <Radio value="location" isDisabled={choices.locations.length === 0}>
+              In a bin or shelf
+            </Radio>
+            <Radio value="picked" isDisabled={choices.books.length === 0}>
+              Let me choose
+            </Radio>
+          </RadioGroup>
+          {bookKind === "tag" && (
+            <Select label="Tag" selectedKey={tag} onSelectionChange={(key) => setTag(key as string)} items={choices.tags.map((option) => ({ id: option.name, ...option }))}>
+              {(item) => <ListBoxItem id={item.id}>{`${item.name} (${item.books})`}</ListBoxItem>}
+            </Select>
+          )}
+          {bookKind === "location" && (
+            <Select
+              label="Bin or shelf"
+              selectedKey={location}
+              onSelectionChange={(key) => setLocation(key as string)}
+              items={choices.locations.map((option) => ({ id: option.name, ...option }))}
+            >
+              {(item) => <ListBoxItem id={item.id}>{`${item.name} (${item.books})`}</ListBoxItem>}
+            </Select>
+          )}
+          {bookKind === "picked" && (
+            <div className="flex flex-col gap-2">
+              <TextField label="Find a book" value={filter} onChange={setFilter} leadingIcon={iconSearch} autoComplete="off" />
+              <p className="text-body-sm text-on-surface-variant">
+                {`${plural(bookCount, "book")} chosen. For a title with several copies, choose how many to give; you keep the rest.`}
+              </p>
+              <div className="flex max-h-96 flex-col overflow-y-auto rounded-md bg-surface-container px-2">
+                {shown.map((book) => {
+                  const chosen = picked[book.id];
+                  return (
+                    <div key={book.id} className="flex min-h-12 items-center gap-2">
+                      <Checkbox
+                        className="min-w-0 grow"
+                        isSelected={chosen !== undefined}
+                        onChange={(on) =>
+                          setPicked((current) => {
+                            const next = { ...current };
+                            if (on) next[book.id] = book.copies;
+                            else delete next[book.id];
+                            return next;
+                          })
+                        }
+                      >
+                        <span className="truncate">
+                          {book.title}
+                          {book.authors.length > 0 && <span className="text-body-md text-on-surface-variant">{` · ${book.authors.join(", ")}`}</span>}
+                        </span>
+                      </Checkbox>
+                      {chosen !== undefined && book.copies > 1 && (
+                        <CopyStepper
+                          title={book.title}
+                          value={chosen}
+                          max={book.copies}
+                          onChange={(value) => setPicked((current) => ({ ...current, [book.id]: value }))}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+                {shown.length === 0 && <p className="px-2 py-3 text-body-md text-on-surface-variant">No books match.</p>}
+              </div>
+            </div>
+          )}
+        </Section>
+        </>
+      )}
 
       {error && (
         <p role="alert" className="rounded-md bg-error-container px-4 py-3 text-body-md text-on-error-container">
@@ -275,7 +321,14 @@ export function PendingHandover({ offer }: { offer: HandoverSummary }) {
   const books = offer.books && plural(offer.books, "book") + (offer.copies > offer.books ? ` (${plural(offer.copies, "copy", "copies")})` : "");
   const what = [offer.classNames.join(", "), books].filter(Boolean).join(" and ");
   return (
-    <Section title={`Waiting for ${offer.toName}`} description={`You've offered ${offer.toName} (${offer.toEmail}) ${what}. Nothing moves until they accept it, from their Home page.`}>
+    <Section
+      title={`Waiting for ${offer.toName ?? offer.toEmail}`}
+      description={
+        offer.toName
+          ? `You've offered ${offer.toName} (${offer.toEmail}) ${what}. Nothing moves until they accept it, from their Home page.`
+          : `You've offered ${offer.toEmail} ${what}. They haven't signed in yet; the offer will be on their Home page the first time they sign in with Google, and nothing moves until they accept it.`
+      }
+    >
       <div className="flex justify-end">
         <Button variant="outlined" onPress={() => setConfirming(true)}>
           Withdraw the offer
@@ -285,7 +338,7 @@ export function PendingHandover({ offer }: { offer: HandoverSummary }) {
         isOpen={confirming}
         onOpenChange={setConfirming}
         title="Withdraw the offer?"
-        message={`${offer.toName} won't be able to accept it. You can offer again at any time.`}
+        message={`${offer.toName ?? offer.toEmail} won't be able to accept it. You can offer again at any time.`}
         confirmLabel="Withdraw"
         onConfirm={async () => {
           const result = await withdrawHandoverAction(offer.id);
