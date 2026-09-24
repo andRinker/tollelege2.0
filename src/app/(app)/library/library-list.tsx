@@ -18,23 +18,31 @@ type Props = {
   books: BookListItem[];
   readingLevelSystem: ReadingLevelSystem;
   suggestions: BookSuggestions;
+  /** False for a co-teacher, who can edit books but not delete them or change lending. */
+  canManage?: boolean;
 };
 
 /**
  * The library as rows, for working through it rather than browsing it: each title carries
  * its three most-used actions, so tidying a shelf doesn't mean opening every book.
  */
-export function LibraryList({ books, readingLevelSystem, suggestions }: Props) {
+export function LibraryList({ books, readingLevelSystem, suggestions, canManage = true }: Props) {
   return (
     <List aria-label="Books">
       {books.map((book) => (
-        <LibraryRow key={book.id} book={book} readingLevelSystem={readingLevelSystem} suggestions={suggestions} />
+        <LibraryRow
+          key={book.id}
+          book={book}
+          readingLevelSystem={readingLevelSystem}
+          suggestions={suggestions}
+          canManage={canManage}
+        />
       ))}
     </List>
   );
 }
 
-function LibraryRow({ book, readingLevelSystem, suggestions }: { book: BookListItem } & Omit<Props, "books">) {
+function LibraryRow({ book, readingLevelSystem, suggestions, canManage }: { book: BookListItem } & Omit<Props, "books">) {
   const showSnackbar = useSnackbar();
   const [editing, setEditing] = useState<BookFormValue | null>(null);
   const [loadingEdit, setLoadingEdit] = useState(false);
@@ -104,17 +112,23 @@ function LibraryRow({ book, readingLevelSystem, suggestions }: { book: BookListI
               <Button variant="tonal" size="xs" icon={iconEdit} isPending={loadingEdit} onPress={() => void edit()}>
                 Edit details
               </Button>
-              <Button variant="text" size="xs" icon={lendingIcon} isPending={savingLendable} onPress={() => void toggleLending()}>
-                {lendingLabel}
-              </Button>
-              <Button variant="text" size="xs" icon={iconDelete} onPress={() => setConfirmDelete(true)}>
-                Delete
-              </Button>
+              {canManage && (
+                <Button variant="text" size="xs" icon={lendingIcon} isPending={savingLendable} onPress={() => void toggleLending()}>
+                  {lendingLabel}
+                </Button>
+              )}
+              {canManage && (
+                <Button variant="text" size="xs" icon={iconDelete} onPress={() => setConfirmDelete(true)}>
+                  Delete
+                </Button>
+              )}
             </div>
             <div role="group" aria-label={book.title} className="flex items-center medium:hidden">
               <IconButton icon={iconEdit} label="Edit details" isPending={loadingEdit} onPress={() => void edit()} />
-              <IconButton icon={lendingIcon} label={lendingLabel} isPending={savingLendable} onPress={() => void toggleLending()} />
-              <IconButton icon={iconDelete} label="Delete" onPress={() => setConfirmDelete(true)} />
+              {canManage && (
+                <IconButton icon={lendingIcon} label={lendingLabel} isPending={savingLendable} onPress={() => void toggleLending()} />
+              )}
+              {canManage && <IconButton icon={iconDelete} label="Delete" onPress={() => setConfirmDelete(true)} />}
             </div>
           </>
         }

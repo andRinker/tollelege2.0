@@ -67,10 +67,13 @@ export function BookActions({
   book,
   readingLevelSystem,
   suggestions,
+  canDelete = true,
 }: {
   book: Book;
   readingLevelSystem: ReadingLevelSystem;
   suggestions: BookSuggestions;
+  /** False for a co-teacher: only the library's owner deletes titles. */
+  canDelete?: boolean;
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState<BookFormValue | null>(null);
@@ -81,14 +84,16 @@ export function BookActions({
       <Button variant="tonal" size="md" compact icon={iconEdit} onPress={() => setEditing(bookFormFromBook(book))}>
         Edit details
       </Button>
-      <MenuTrigger>
-        <IconButton icon={iconMoreVert} label="More actions" size="md" compact variant="standard" />
-        <Menu onAction={(key) => key === "delete" && setConfirmDelete(true)}>
-          <MenuItem id="delete" icon={iconDelete} destructive>
-            Delete book
-          </MenuItem>
-        </Menu>
-      </MenuTrigger>
+      {canDelete && (
+        <MenuTrigger>
+          <IconButton icon={iconMoreVert} label="More actions" size="md" compact variant="standard" />
+          <Menu onAction={(key) => key === "delete" && setConfirmDelete(true)}>
+            <MenuItem id="delete" icon={iconDelete} destructive>
+              Delete book
+            </MenuItem>
+          </Menu>
+        </MenuTrigger>
+      )}
 
       <EditBookDialog
         bookId={book.id}
@@ -135,9 +140,11 @@ type CopyMenuProps = {
   status: CopyStatus;
   isCheckedOut: boolean;
   canDelete: boolean;
+  /** False for a co-teacher: withdrawing a copy takes it out of the library, which is the owner's call. */
+  canWithdraw?: boolean;
 };
 
-export function CopyMenu({ bookId, copyId, copyNumber, status, isCheckedOut, canDelete }: CopyMenuProps) {
+export function CopyMenu({ bookId, copyId, copyNumber, status, isCheckedOut, canDelete, canWithdraw = true }: CopyMenuProps) {
   const showSnackbar = useSnackbar();
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -168,9 +175,11 @@ export function CopyMenu({ bookId, copyId, copyNumber, status, isCheckedOut, can
               <MenuItem id="lost" icon={iconReport}>
                 Mark lost
               </MenuItem>
-              <MenuItem id="withdrawn" icon={iconBlock}>
-                Withdraw
-              </MenuItem>
+              {canWithdraw && (
+                <MenuItem id="withdrawn" icon={iconBlock}>
+                  Withdraw
+                </MenuItem>
+              )}
             </>
           ) : (
             <MenuItem id="restore" icon={iconRestartAlt}>

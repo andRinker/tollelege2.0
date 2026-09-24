@@ -12,7 +12,7 @@ import { READING_LEVEL_FIELD_LABELS } from "@/lib/reading-levels";
 import { catalogSummary, getBookDetail } from "@/server/catalog";
 import { NotFoundError } from "@/server/errors";
 import { copyLendingStates } from "@/server/lending";
-import { requireTeacher } from "@/server/session";
+import { requireClassroom } from "@/server/session";
 import { getRequestSettings } from "@/server/theme";
 import { cx } from "@/ui/cx";
 import { LinkButton } from "@/ui/components/button";
@@ -32,12 +32,12 @@ const STATUS_LABELS: Record<Exclude<CopyStatus, "in_circulation">, string> = {
 };
 
 export default async function BookPage({ params }: PageProps<"/library/[bookId]">) {
-  const { teacherId } = await requireTeacher();
+  const { teacherId, classIds, isOwner } = await requireClassroom();
   const { bookId } = await params;
   if (!z.uuid().safeParse(bookId).success) notFound();
 
   const db = getDb();
-  const detail = await getBookDetail(db, teacherId, bookId).catch((error: unknown) => {
+  const detail = await getBookDetail(db, teacherId, bookId, classIds).catch((error: unknown) => {
     if (error instanceof NotFoundError) notFound();
     throw error;
   });
@@ -50,7 +50,9 @@ export default async function BookPage({ params }: PageProps<"/library/[bookId]"
   const { book, copies, history } = detail;
 
   const inCirculation = copies.filter((copy) => copy.status === "in_circulation");
-  const available = inCirculation.filter((copy) => !copy.loanId).length;
+  // A copy out to a class a co-teacher can't see has no loan attached, but it's still not on the shelf.
+  const isOut = (copy: (typeof copies)[number]) => Boolean(copy.loanId) || copy.borrowerHidden;
+  const available = inCirculation.filter((copy) => !isOut(copy)).length;
   const facts = [
     book.isbn13 && { label: "ISBN", value: formatIsbn13(book.isbn13) },
     book.publisher && { label: "Publisher", value: book.publisher },
@@ -75,6 +77,7 @@ export default async function BookPage({ params }: PageProps<"/library/[bookId]"
             book={book}
             readingLevelSystem={settings.readingLevelSystem}
             suggestions={{ tags: summary.tags, locations: summary.locations }}
+            canDelete={isOwner}
           />
         }
       />
@@ -121,7 +124,7 @@ export default async function BookPage({ params }: PageProps<"/library/[bookId]"
               {book.description && <p className="max-w-prose text-body-lg text-on-surface-variant">{book.description}</p>}
               {book.notes && (
                 <div className="rounded-lg bg-tertiary-container px-4 py-3 text-body-md text-on-tertiary-container">
-                  <span className="text-label-lg-em">Your notes: </span>
+                  <span className="text-label-lg-em">{isOwner ? "Your notes: " : "Notes: "}</span>
                   {book.notes}
                 </div>
               )}
@@ -141,7 +144,9 @@ export default async function BookPage({ params }: PageProps<"/library/[bookId]"
                 const here =
                   copy.status !== "in_circulation"
                     ? STATUS_LABELS[copy.status]
-                    : copy.loanId
+                    : copy.borrowerHidden
+                      ? `Checked out${copy.dueOn ? ` · ${describeDueDate(copy.dueOn, today)}` : ""}`
+                      : copy.loanId
                       ? `${studentName} · ${copy.dueOn ? describeDueDate(copy.dueOn, today) : `since ${formatInstant(copy.checkedOutAt as Date, settings.timeZone, today)}`}`
                       : "Available";
                 const supporting =
@@ -155,12 +160,12 @@ export default async function BookPage({ params }: PageProps<"/library/[bookId]"
                     key={copy.id}
                     leading={
                       <Shape
-                        shape={copy.loanId ? "clover4" : copy.status === "in_circulation" ? "cookie9" : "square"}
+                        shape={isOut(copy) ? "clover4" : copy.status === "in_circulation" ? "cookie9" : "square"}
                         size={40}
                         className={
                           copy.status !== "in_circulation"
                             ? "fill-surface-container-highest"
-                            : copy.loanId
+                            : isOut(copy)
                               ? overdue
                                 ? "fill-error-container"
                                 : "fill-tertiary-container"
@@ -171,19 +176,20 @@ export default async function BookPage({ params }: PageProps<"/library/[bookId]"
                       </Shape>
                     }
                     headline={`Copy ${copy.copyNumber}`}
-                    supporting={<span className={cx(overdue && copy.loanId && "text-error")}>{supporting}</span>}
+                    supporting={<span className={cx(overdue && isOut(copy) && "text-error")}>{supporting}</span>}
                     href={copy.studentId ? `/students/${copy.studentId}` : undefined}
                     actions={
                       copy.loanId && studentName ? (
                         <LoanActions loanId={copy.loanId} title={book.title} studentName={studentName} />
-                      ) : lending ? null : (
+                      ) : lending || copy.borrowerHidden ? null : (
                         <CopyMenu
                           bookId={book.id}
                           copyId={copy.id}
                           copyNumber={copy.copyNumber}
                           status={copy.status}
                           isCheckedOut={Boolean(copy.loanId)}
-                          canDelete={copies.length > 1}
+                          canDelete={isOwner && copies.length > 1}
+                          canWithdraw={isOwner}
                         />
                       )
                     }
@@ -193,12 +199,14 @@ export default async function BookPage({ params }: PageProps<"/library/[bookId]"
             </List>
           </section>
 
-          <section className="flex flex-col gap-3">
-            <h2 className="text-title-lg-em">Lending</h2>
-            <Card variant="outlined" className="px-4 py-4">
-              <LendableSwitch bookId={book.id} lendable={book.lendable} />
-            </Card>
-          </section>
+          {isOwner && (
+            <section className="flex flex-col gap-3">
+              <h2 className="text-title-lg-em">Lending</h2>
+              <Card variant="outlined" className="px-4 py-4">
+                <LendableSwitch bookId={book.id} lendable={book.lendable} />
+              </Card>
+            </section>
+          )}
 
           <section className="flex flex-col gap-3">
             <h2 className="text-title-lg-em">Checkout history</h2>

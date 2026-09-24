@@ -43,7 +43,7 @@ npx vercel link && npx vercel env pull .env.local
 
 ## Rules
 
-- **Tenant isolation.** Teacher data is always filtered by `teacher_id`, and the teacher ID comes only from `requireTeacher()` in `src/server/session.ts` — never from client input. Data-access functions live in `src/server/*` with the signature `(db, teacherId, input)`. The lending library is the one place two teachers meet, and it goes through `shelf_loans` — see below. The admin is the one role that reaches across, and only through `src/server/admin.ts` behind `requireAdmin()` — see below. Nothing else crosses.
+- **Tenant isolation.** Teacher data is always filtered by `teacher_id`, and the teacher ID comes only from `requireTeacher()` in `src/server/session.ts` — never from client input. Data-access functions live in `src/server/*` with the signature `(db, teacherId, input)`. The lending library is one place two teachers meet, and it goes through `shelf_loans`; co-teaching is the other, through `class_teachers` and `requireClassroom()` — see both below. The admin is the one role that reaches across, and only through `src/server/admin.ts` behind `requireAdmin()` — see below. Nothing else crosses.
 - Tables holding teacher data need a `teacher_id` column, a unique `(id, teacher_id)` constraint, and composite foreign keys `(parent_id, teacher_id)` to their parents.
 - `src/proxy.ts` only redirects optimistically on cookie presence. Every page, layout, and server action must call `requireTeacher()`.
 - Schema files in `src/db/schema/` use relative imports, because drizzle-kit loads them without path aliases.
@@ -115,6 +115,20 @@ Consequences, all deliberate:
 - "Last active" counts only a teacher's own sessions, never ones an admin started by acting as them.
 - `/privacy` says what an admin can see and do, and must keep matching.
 
+## Co-teaching
+
+An owner shares a class, one at a time, with a co-teacher, who then works in the owner's classroom: the owner's library, and only the shared classes' students and checkouts. `class_teachers` holds the grants (composite `(class_id, owner_teacher_id)` key into `classes`, so a grant naming the wrong owner is rejected by the database, and deleting a class ends its sharing). `src/server/coteaching.ts` owns the rules.
+
+`requireClassroom()` returns a `Classroom`: `teacherId` is the **owner** (pass it to the data layer exactly as before), `actorId` is who's signed in, and `classIds` is the shared classes, or null for your own classroom. A `classroom` cookie says which one you're in; `resolveClassroom` checks it against the grants every request and falls back to your own, so a forged or stale cookie gets you nothing.
+
+Consequences, all deliberate:
+
+- **Access is default-closed.** Only pages and actions that call `requireClassroom()` work in a shared classroom; everything else still calls `requireTeacher()` and sees your own account. Settings, Lending and phone pairing stay that way. Converting a page means passing `classIds` to every read (`inScope`) and asserting scope (`assertClassInScope`, `assertStudentInScope`, `assertLoanInScope`, which throw `NotFoundError`) on every write that names a class, student or loan.
+- **The owner's decisions stay the owner's**, enforced in the action with `assertOwner`, not only by hiding buttons: deleting books, copies or students, withdrawing a copy, lending settings, and creating, editing, archiving or deleting classes. Students with no class are the owner's alone.
+- A copy out to a student in an unshared class shows as checked out with the borrower redacted (`borrowerHidden`), so it's never offered as available.
+- A co-teacher is granted only on a **verified** email. An address with no account, or an unverified one, gets an invite in `class_teacher_invites`, claimed in the app layout on the first verified sign-in. Otherwise registering a colleague's address with a password would hand over their class.
+- Checkouts aren't attributed to who made them; the classroom is the owner's.
+
 ## Lending library
 
 `src/server/connections.ts` links two teachers; `src/server/lending.ts` moves a book between them. Teachers connect one pair at a time — an invitation by email, accepted by the other — and `teacher_connections` stores the pair normalised (`teacher_a_id < teacher_b_id`) so one pair can only ever have one row. Once connected, each sees the other's titles; `books.lendable` defaults to true and is the per-title exception, for class sets.
@@ -123,7 +137,7 @@ Consequences, all deliberate:
 
 Consequences, all deliberate:
 
-- `shelf_loans` is the only table holding two teacher IDs, and it reaches each library through a composite `(id, teacher_id)` foreign key. A row pairing one teacher's copy with another's shelf is rejected by the database, not by a query someone has to remember to write.
+- `shelf_loans` holds two teacher IDs (so does `class_teachers`), and it reaches each library through a composite `(id, teacher_id)` foreign key. A row pairing one teacher's copy with another's shelf is rejected by the database, not by a query someone has to remember to write.
 - The stand-in folds into the borrower's existing title when they already own the ISBN, the same way a shelf photo offers a copy rather than a duplicate.
 - Returning **withdraws** the stand-in rather than deleting it once a student has read it, so the borrower's checkout history outlives the loan. With no history it is deleted, along with the title if that was its only copy.
 - A borrowed copy is never offered on to a third teacher, and `assertNotInShelfLoan` blocks deleting or restatusing anything currently away.

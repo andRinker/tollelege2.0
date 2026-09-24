@@ -82,7 +82,16 @@ export default function PrivacyPage() {
         <Section title="Who can see your data">
           <p>
             Your classes, your students, and your checkout history are private to your account. No other teacher can see
-            them, whatever else you share.
+            them unless you add them as a co-teacher of a class.
+          </p>
+          <p>
+            A co-teacher is added to one class at a time, by you, and only once they have signed in with Google using the
+            email you gave, so nobody can claim a class by registering someone else&rsquo;s address. For the classes you
+            share, they can see the students and their checkouts, check your books out to those students and back in, keep
+            the roster, and add books to your library. They can also see your library and its notes, so they can find a
+            book, and they can see that a copy is checked out to someone in a class you haven&rsquo;t shared, but not to
+            whom. They never see your other classes or students, and they can&rsquo;t delete your books, delete students,
+            or change what you lend. You can remove a co-teacher, and they can leave, at any time.
           </p>
           <p>
             The one exception is the site&rsquo;s administrator, who looks after {APP_NAME} for your school. An
@@ -159,9 +168,9 @@ export default function PrivacyPage() {
 
         <Section title="Cookies">
           <p>
-            {APP_NAME} uses a sign-in cookie to keep you signed in, and three preference cookies: your time zone, so due
-            dates are right, whether the navigation menu is expanded, and whether your library shows as a grid or a list.
-            While an administrator is working inside someone&rsquo;s account, one more cookie holds the administrator&rsquo;s
+            {APP_NAME} uses a sign-in cookie to keep you signed in, and a few preference cookies: your time zone, so due
+            dates are right, whether the navigation menu is expanded, and whether your library shows as a grid or a list,
+            and, if you co-teach, whose classroom you&rsquo;re working in. While an administrator is working inside someone&rsquo;s account, one more cookie holds the administrator&rsquo;s
             own sign-in, so they can return to it. There are no tracking or advertising cookies.
           </p>
         </Section>

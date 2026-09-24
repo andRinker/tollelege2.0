@@ -7,7 +7,7 @@ import { describeDueDate, formatRecentInstant, hourInTimeZone, todayInTimeZone }
 import { catalogSummary } from "@/server/catalog";
 import { type ActivityItem, circulationStats, listOpenLoans, recentActivity } from "@/server/circulation";
 import { rosterCounts } from "@/server/roster";
-import { requireTeacher } from "@/server/session";
+import { requireClassroom, requireTeacher } from "@/server/session";
 import { getRequestSettings } from "@/server/theme";
 import { cx } from "@/ui/cx";
 import { LinkButton } from "@/ui/components/button";
@@ -50,15 +50,18 @@ const ACTIVITY: Record<ActivityItem["kind"], { icon: IconData; describe: (studen
 
 export default async function DashboardPage() {
   const teacher = await requireTeacher();
+  // In a classroom you co-teach, everything here is its owner's, limited to the shared classes.
+  const classroom = await requireClassroom();
   const settings = await getRequestSettings();
   const today = todayInTimeZone(settings.timeZone);
   const db = getDb();
+  const { teacherId, classIds } = classroom;
   const [stats, catalog, roster, overdueLoans, activity] = await Promise.all([
-    circulationStats(db, teacher.teacherId, today, settings.timeZone ?? "UTC"),
-    catalogSummary(db, teacher.teacherId),
-    rosterCounts(db, teacher.teacherId),
-    listOpenLoans(db, teacher.teacherId, { today, overdueOnly: true, limit: OVERDUE_PREVIEW }),
-    recentActivity(db, teacher.teacherId, 8),
+    circulationStats(db, teacherId, today, settings.timeZone ?? "UTC", classIds),
+    catalogSummary(db, teacherId),
+    rosterCounts(db, teacherId, classIds),
+    listOpenLoans(db, teacherId, { today, overdueOnly: true, limit: OVERDUE_PREVIEW, classIds }),
+    recentActivity(db, teacherId, 8, classIds),
   ]);
 
   const firstName = teacher.name.split(/\s+/)[0];
@@ -67,7 +70,8 @@ export default async function DashboardPage() {
     { done: roster.students > 0, label: "Set up a class", detail: "Paste your roster or upload a CSV.", action: "Go to Classes", href: "/classes", icon: iconGroupAdd },
     { done: activity.length > 0, label: "Check out a book", detail: "Pick a student, then scan the book.", action: "Check out", href: "/checkout", icon: iconOutput },
   ];
-  const settingUp = setupSteps.some((step) => !step.done);
+  // Setting a classroom up is its owner's job, not something to nag a co-teacher about.
+  const settingUp = classroom.isOwner && setupSteps.some((step) => !step.done);
   const hasLibrary = catalog.titles > 0 || roster.students > 0;
 
   const summary =

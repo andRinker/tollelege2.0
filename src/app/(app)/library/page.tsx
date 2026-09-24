@@ -4,7 +4,7 @@ import { Availability } from "@/components/availability";
 import { BookCover } from "@/components/book-cover";
 import { getDb } from "@/db/client";
 import { catalogSummary, listBooks } from "@/server/catalog";
-import { requireTeacher } from "@/server/session";
+import { requireClassroom } from "@/server/session";
 import { getRequestSettings } from "@/server/theme";
 import { LinkButton } from "@/ui/components/button";
 import { EmptyState, PageHeader } from "@/ui/components/expressive";
@@ -28,7 +28,8 @@ function pageHref(params: Record<string, string | string[] | undefined>, page: n
 }
 
 export default async function LibraryPage({ searchParams }: PageProps<"/library">) {
-  const { teacherId } = await requireTeacher();
+  // A co-teacher works in the owner's whole library; only deleting and lending stay the owner's.
+  const { teacherId, isOwner } = await requireClassroom();
   const params = await searchParams;
   const filters = parseLibraryFilters(params);
   const db = getDb();
@@ -98,6 +99,7 @@ export default async function LibraryPage({ searchParams }: PageProps<"/library"
               books={result.items}
               readingLevelSystem={settings.readingLevelSystem}
               suggestions={{ tags: summary.tags, locations: summary.locations }}
+              canManage={isOwner}
             />
           ) : (
             <ul className="grid grid-cols-2 gap-3 medium:grid-cols-3 expanded:grid-cols-4 large:grid-cols-5 xlarge:grid-cols-6">

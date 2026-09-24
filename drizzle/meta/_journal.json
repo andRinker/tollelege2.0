@@ -43,6 +43,13 @@
       "when": 1790205552349,
       "tag": "0005_admin_created_account",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790207237340,
+      "tag": "0006_coteaching",
+      "breakpoints": true
     }
   ]
 }

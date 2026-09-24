@@ -8,7 +8,8 @@ import { getDb } from "@/db/client";
 import { describeDueDate, formatInstant, isOverdue, todayInTimeZone } from "@/lib/dates";
 import { NotFoundError } from "@/server/errors";
 import { getStudentDetail, listClasses } from "@/server/roster";
-import { requireTeacher } from "@/server/session";
+import { assertStudentInScope } from "@/server/coteaching";
+import { requireClassroom } from "@/server/session";
 import { getRequestSettings } from "@/server/theme";
 import { cx } from "@/ui/cx";
 import { LinkButton } from "@/ui/components/button";
@@ -20,11 +21,17 @@ import { StudentActions } from "../../classes/student-actions";
 export const metadata: Metadata = { title: "Student" };
 
 export default async function StudentPage({ params }: PageProps<"/students/[studentId]">) {
-  const { teacherId } = await requireTeacher();
+  const classroom = await requireClassroom();
+  const { teacherId, classIds } = classroom;
   const { studentId } = await params;
   if (!z.uuid().safeParse(studentId).success) notFound();
 
   const db = getDb();
+  // A student outside a co-teacher's shared classes doesn't exist, as far as they can tell.
+  await assertStudentInScope(db, classroom, studentId).catch((error: unknown) => {
+    if (error instanceof NotFoundError) notFound();
+    throw error;
+  });
   const settings = await getRequestSettings();
   const today = todayInTimeZone(settings.timeZone);
   const [detail, allClasses] = await Promise.all([
@@ -32,7 +39,7 @@ export default async function StudentPage({ params }: PageProps<"/students/[stud
       if (error instanceof NotFoundError) notFound();
       throw error;
     }),
-    listClasses(db, teacherId, today),
+    listClasses(db, teacherId, today, classIds),
   ]);
 
   const { student, current, history } = detail;
@@ -74,6 +81,7 @@ export default async function StudentPage({ params }: PageProps<"/students/[stud
               classes={classOptions}
               variant="page"
               afterDeleteHref={backHref}
+              canDelete={classroom.isOwner}
             />
           </>
         }

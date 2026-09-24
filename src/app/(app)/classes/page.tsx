@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { getDb } from "@/db/client";
 import { schoolYearLabel, todayInTimeZone } from "@/lib/dates";
 import { listClasses } from "@/server/roster";
-import { requireTeacher } from "@/server/session";
+import { requireClassroom } from "@/server/session";
 import { getRequestSettings } from "@/server/theme";
 import { EmptyState, PageHeader, Shape } from "@/ui/components/expressive";
 import { List, ListItem } from "@/ui/components/list";
@@ -33,10 +33,10 @@ function classMonogram(name: string) {
 }
 
 export default async function ClassesPage() {
-  const { teacherId } = await requireTeacher();
+  const classroom = await requireClassroom();
   const settings = await getRequestSettings();
   const today = todayInTimeZone(settings.timeZone);
-  const all = await listClasses(getDb(), teacherId, today);
+  const all = await listClasses(getDb(), classroom.teacherId, today, classroom.classIds);
   const active = all.filter((klass) => !klass.archivedAt);
   const archived = all.filter((klass) => klass.archivedAt);
   const studentTotal = active.reduce((sum, klass) => sum + klass.studentCount, 0);
@@ -51,7 +51,7 @@ export default async function ClassesPage() {
             ? `${active.length} ${active.length === 1 ? "class" : "classes"} · ${studentTotal} ${studentTotal === 1 ? "student" : "students"}`
             : undefined
         }
-        actions={active.length > 0 && <NewClassButton defaultSchoolYear={defaultSchoolYear} />}
+        actions={active.length > 0 && classroom.isOwner && <NewClassButton defaultSchoolYear={defaultSchoolYear} />}
       />
 
       {active.length === 0 ? (
@@ -60,7 +60,7 @@ export default async function ClassesPage() {
           shape="clover4"
           title="No classes yet"
           description="Create a class, then paste or upload your roster. Students don't need accounts."
-          action={<NewClassButton defaultSchoolYear={defaultSchoolYear} size="md" />}
+          action={classroom.isOwner && <NewClassButton defaultSchoolYear={defaultSchoolYear} size="md" />}
         />
       ) : (
         <ul className="grid gap-3 medium:grid-cols-2 large:grid-cols-3">

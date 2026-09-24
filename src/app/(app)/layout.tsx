@@ -3,19 +3,26 @@ import type { ReactNode } from "react";
 import { getDb } from "@/db/client";
 import { lendingAttentionCount } from "@/server/lending";
 import { currentUserIsAdmin } from "@/server/admin";
-import { getActingAdmin, requireTeacher } from "@/server/session";
+import { claimCoTeacherInvites, listSharedClassrooms } from "@/server/coteaching";
+import { getActingAdmin, getSession, requireClassroom, requireTeacher } from "@/server/session";
 import { rememberTimeZone } from "@/server/settings";
 import { getRequestSettings } from "@/server/theme";
 import { AppShell } from "./app-shell";
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const teacher = await requireTeacher();
-  const [settings, cookieStore] = await Promise.all([getRequestSettings(), cookies()]);
+  const [settings, cookieStore, session] = await Promise.all([getRequestSettings(), cookies(), getSession()]);
 
-  const [lendingWaiting, isAdmin, acting] = await Promise.all([
+  // Someone invited to co-teach before they had an account gets the classes here, the
+  // first time they're signed in with that email verified.
+  if (session) await claimCoTeacherInvites(getDb(), session.user);
+
+  const [lendingWaiting, isAdmin, acting, classroom, sharedClassrooms] = await Promise.all([
     lendingAttentionCount(getDb(), teacher.teacherId),
     currentUserIsAdmin(),
     getActingAdmin(),
+    requireClassroom(),
+    listSharedClassrooms(getDb(), teacher.teacherId),
   ]);
 
   // The root layout's inline script stores the browser time zone; save it once. Not while
@@ -32,6 +39,12 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       railExpanded={cookieStore.get("rail")?.value === "expanded"}
       lendingWaiting={lendingWaiting}
       isAdmin={isAdmin}
+      classrooms={sharedClassrooms.map(({ ownerId, ownerName, classes }) => ({
+        ownerId,
+        ownerName,
+        classNames: classes.map((klass) => klass.name),
+      }))}
+      currentClassroom={classroom.isOwner ? null : classroom.teacherId}
       // Formatted here, in the teacher's zone, so the server and browser render the same time.
       actingUntil={
         acting

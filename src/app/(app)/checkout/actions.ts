@@ -19,7 +19,8 @@ import {
   undoCheckOut,
 } from "@/server/circulation";
 import { isUserFacingError } from "@/server/errors";
-import { requireTeacher } from "@/server/session";
+import { assertLoanInScope, assertStudentInScope } from "@/server/coteaching";
+import { requireClassroom } from "@/server/session";
 import { getTeacherSettings } from "@/server/settings";
 
 const id = z.uuid();
@@ -44,11 +45,13 @@ async function validDueOn(teacherId: string, dueOn: string | null): Promise<stri
 }
 
 export async function checkOutAction(input: { studentId: string; bookId: string; dueOn: string | null }): Promise<ActionResult<CheckoutResult>> {
-  const { teacherId } = await requireTeacher();
+  const classroom = await requireClassroom();
+  const { teacherId } = classroom;
   if (!id.safeParse(input.studentId).success || !id.safeParse(input.bookId).success) return fail("That book or student wasn't found.");
   const dueOn = await validDueOn(teacherId, input.dueOn);
   if (dueOn && typeof dueOn === "object") return fail(dueOn.error);
   try {
+    await assertStudentInScope(getDb(), classroom, input.studentId);
     const result = await checkOutBook(getDb(), teacherId, { studentId: input.studentId, bookId: input.bookId, dueOn });
     revalidateCirculation();
     return ok(result);
@@ -64,7 +67,8 @@ export type IsbnCheckoutResult =
   | { status: "error"; message: string };
 
 export async function checkOutByIsbnAction(input: { studentId: string; isbn: string; dueOn: string | null }): Promise<IsbnCheckoutResult> {
-  const { teacherId } = await requireTeacher();
+  const classroom = await requireClassroom();
+  const { teacherId } = classroom;
   const isbn13 = normalizeIsbn(String(input.isbn));
   if (!isbn13) return { status: "invalid" };
   const book = await findBookByIsbn(getDb(), teacherId, isbn13);
@@ -74,16 +78,19 @@ export async function checkOutByIsbnAction(input: { studentId: string; isbn: str
 }
 
 export async function searchBooksToCheckOutAction(query: string) {
-  const { teacherId } = await requireTeacher();
+  const classroom = await requireClassroom();
+  const { teacherId } = classroom;
   const trimmed = String(query).trim().slice(0, 100);
   if (trimmed.length < 2) return [];
   return findBooksToCheckOut(getDb(), teacherId, trimmed);
 }
 
 export async function undoCheckOutAction(loanId: string): Promise<ActionResult> {
-  const { teacherId } = await requireTeacher();
+  const classroom = await requireClassroom();
+  const { teacherId } = classroom;
   if (!id.safeParse(loanId).success) return fail("That checkout wasn't found.");
   try {
+    await assertLoanInScope(getDb(), classroom, loanId);
     await undoCheckOut(getDb(), teacherId, loanId);
     revalidateCirculation();
     return ok();
@@ -93,9 +100,11 @@ export async function undoCheckOutAction(loanId: string): Promise<ActionResult> 
 }
 
 export async function checkInAction(loanId: string): Promise<ActionResult<ReturnResult>> {
-  const { teacherId } = await requireTeacher();
+  const classroom = await requireClassroom();
+  const { teacherId } = classroom;
   if (!id.safeParse(loanId).success) return fail("That checkout wasn't found.");
   try {
+    await assertLoanInScope(getDb(), classroom, loanId);
     const result = await checkInLoan(getDb(), teacherId, loanId);
     revalidateCirculation();
     return ok(result);
@@ -114,7 +123,8 @@ export type IsbnCheckInResult =
 
 /** Scanning a returned book: checks it in right away when only one copy is out. */
 export async function checkInByIsbnAction(isbn: string): Promise<IsbnCheckInResult> {
-  const { teacherId } = await requireTeacher();
+  const classroom = await requireClassroom();
+  const { teacherId } = classroom;
   const isbn13 = normalizeIsbn(String(isbn));
   if (!isbn13) return { status: "invalid" };
   const db = getDb();
@@ -122,7 +132,12 @@ export async function checkInByIsbnAction(isbn: string): Promise<IsbnCheckInResu
   if (!book) return { status: "not_in_library", isbn13 };
 
   const settings = await getTeacherSettings(db, teacherId);
-  const open = await listOpenLoans(db, teacherId, { today: todayInTimeZone(settings.timeZone), bookId: book.id });
+  // Only checkouts to students a co-teacher can see: a copy out to another class isn't theirs to take back.
+  const open = await listOpenLoans(db, teacherId, {
+    today: todayInTimeZone(settings.timeZone),
+    bookId: book.id,
+    classIds: classroom.classIds,
+  });
   if (open.length === 0) return { status: "none_out", title: book.title, bookId: book.id };
   if (open.length > 1) {
     return {
@@ -143,9 +158,11 @@ export async function checkInByIsbnAction(isbn: string): Promise<IsbnCheckInResu
 }
 
 export async function undoCheckInAction(loanId: string): Promise<ActionResult> {
-  const { teacherId } = await requireTeacher();
+  const classroom = await requireClassroom();
+  const { teacherId } = classroom;
   if (!id.safeParse(loanId).success) return fail("That checkout wasn't found.");
   try {
+    await assertLoanInScope(getDb(), classroom, loanId);
     await undoCheckIn(getDb(), teacherId, loanId);
     revalidateCirculation();
     return ok();
@@ -155,9 +172,11 @@ export async function undoCheckInAction(loanId: string): Promise<ActionResult> {
 }
 
 export async function markLostAction(loanId: string): Promise<ActionResult<ReturnResult>> {
-  const { teacherId } = await requireTeacher();
+  const classroom = await requireClassroom();
+  const { teacherId } = classroom;
   if (!id.safeParse(loanId).success) return fail("That checkout wasn't found.");
   try {
+    await assertLoanInScope(getDb(), classroom, loanId);
     const result = await markLoanLost(getDb(), teacherId, loanId);
     revalidateCirculation();
     return ok(result);
