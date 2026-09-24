@@ -131,7 +131,7 @@ Consequences, all deliberate:
 
 ### Handing over
 
-`src/server/handover.ts` gives classes and books to another teacher: offered from Settings → Hand over, accepted from the recipient's Home page. The recipient needs a verified email, like a co-teacher. An offer (`handovers`) stores the class and book IDs resolved when it was sent, one pending per sender, and nothing moves until it's accepted.
+`src/server/handover.ts` gives classes and books to another teacher: offered from Settings → Hand over, accepted from the recipient's Home page. The recipient needs a verified email, like a co-teacher: an offer to anyone else waits on `to_email` with `to_teacher_id` null, and `claimHandovers` in the app layout gives it to the first verified sign-in with that address. The student-ID clash check needs the recipient's roster, so for a waiting offer it only runs on accept. An offer (`handovers`) stores the class and book IDs resolved when it was sent, one pending per sender, and nothing moves until it's accepted. The one exception is **"My entire library"** (`everything`), which stores no IDs and is resolved again when counted and when accepted, because an offer waiting for a colleague to sign up can sit for months while the library grows.
 
 Accepting is **one transaction that rewrites `teacher_id` on every row that moves**, with the ownership keys deferred to commit (`set constraints all deferred`). Migration 0007 made those keys `DEFERRABLE INITIALLY IMMEDIATE`, by hand, because drizzle can't declare it; they're still checked per statement everywhere else, and ON DELETE actions never defer. If the keys are ever regenerated, carry that across with the `SET NULL (column)` clauses.
 

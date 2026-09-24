@@ -24,6 +24,8 @@ const id = z.uuid();
 const offerInput = z.object({
   email: z.email("Enter their school email address.").max(320),
   classIds: z.array(z.uuid()).max(200),
+  /** The whole library, resolved again when it's accepted; `classIds` and `books` are then ignored. */
+  everything: z.boolean().optional(),
   books: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("none") }),
     z.object({ kind: z.literal("all") }),

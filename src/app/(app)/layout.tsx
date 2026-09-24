@@ -4,6 +4,7 @@ import { getDb } from "@/db/client";
 import { lendingAttentionCount } from "@/server/lending";
 import { currentUserIsAdmin } from "@/server/admin";
 import { claimCoTeacherInvites, listSharedClassrooms } from "@/server/coteaching";
+import { claimHandovers } from "@/server/handover";
 import { getActingAdmin, getSession, requireClassroom, requireTeacher } from "@/server/session";
 import { rememberTimeZone } from "@/server/settings";
 import { getRequestSettings } from "@/server/theme";
@@ -13,9 +14,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   const teacher = await requireTeacher();
   const [settings, cookieStore, session] = await Promise.all([getRequestSettings(), cookies(), getSession()]);
 
-  // Someone invited to co-teach before they had an account gets the classes here, the
-  // first time they're signed in with that email verified.
-  if (session) await claimCoTeacherInvites(getDb(), session.user);
+  // Someone invited to co-teach, or offered a hand-over, before they had an account gets
+  // it here, the first time they're signed in with that email verified.
+  if (session) await Promise.all([claimCoTeacherInvites(getDb(), session.user), claimHandovers(getDb(), session.user)]);
 
   const [lendingWaiting, isAdmin, acting, classroom, sharedClassrooms] = await Promise.all([
     lendingAttentionCount(getDb(), teacher.teacherId),

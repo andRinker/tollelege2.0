@@ -98,7 +98,7 @@ export default async function DashboardPage() {
       <div className="flex flex-col gap-8 pb-8">
         {offers.length > 0 && (
           <HandoverOffers
-            offers={offers.map(({ id, fromName, classNames, books, copies }) => ({ id, fromName, classNames, books, copies }))}
+            offers={offers.map(({ id, fromName, classNames, everything, books, copies }) => ({ id, fromName, classNames, everything, books, copies }))}
           />
         )}
         {settingUp && (

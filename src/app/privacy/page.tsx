@@ -94,8 +94,9 @@ export default function PrivacyPage() {
             or change what you lend. You can remove a co-teacher, and they can leave, at any time.
           </p>
           <p>
-            You can also hand classes and books over to another teacher, for instance at the end of a school year. They
-            must have signed in with Google, and nothing moves until they accept. A class goes with its students and their
+            You can also hand classes and books over to another teacher, for instance at the end of a school year. If
+            they haven&rsquo;t signed up yet, the offer waits until someone signs in with Google using the email you gave, so
+            nobody can claim it by registering that address with a password. Nothing moves until they accept. A class goes with its students and their
             checkout history, and becomes theirs; you stay on as a co-teacher of it until they remove you. Before they
             accept, they see only your name, the names of the classes, and how many books.
           </p>
