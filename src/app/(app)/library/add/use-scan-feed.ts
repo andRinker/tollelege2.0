@@ -2,12 +2,13 @@
 
 import { useEffect, useRef } from "react";
 import type { QuickAddOutcome } from "@/server/quick-add";
-import type { ShelfSlot } from "@/server/shelf-scan";
+import type { ShelfSlot, ShelfTally } from "@/server/shelf-scan";
 
 export type ScanFeedEvent =
   | { seq: number; kind: "book_added"; payload: Extract<QuickAddOutcome, { status: "added" }> }
   | { seq: number; kind: "lookup_failed"; payload: Exclude<QuickAddOutcome, { status: "added" }> }
-  | { seq: number; kind: "shelf_proposed"; payload: { slots: ShelfSlot[]; needsAttention: number } };
+  // `tally` is missing from shelves sent before phones could pass a count.
+  | { seq: number; kind: "shelf_proposed"; payload: { slots: ShelfSlot[]; needsAttention: number; tally?: ShelfTally } };
 
 /** Slow enough to be cheap, fast enough that a scan feels like it landed instantly. */
 const INTERVAL_MS = 2000;

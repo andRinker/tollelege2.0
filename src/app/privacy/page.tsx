@@ -161,7 +161,8 @@ export default function PrivacyPage() {
               titles off the spines and sends them back. Nothing is added to your library until you confirm it.
             </p>
             <p>
-              The photo is used for that one reading and then discarded. {APP_NAME} never saves it &mdash; not in the database,
+              The photo is used for that reading, and for one second look if you gave a count of the books on the shelf and the
+              first reading came up short, and then discarded. {APP_NAME} never saves it &mdash; not in the database,
               not on disk &mdash; and never sends anything else with it. What Google does with it is covered by their own
               privacy terms.
             </p>

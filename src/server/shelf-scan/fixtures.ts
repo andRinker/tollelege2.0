@@ -9,12 +9,29 @@ import type { SpineSighting } from "./vision";
  * A fixture where everything matches would never have shown the gap rows at all.
  */
 export const FIXTURE_SHELF: SpineSighting[] = [
-  { reading: { title: "The Alchemist", author: "Paulo Coelho" }, fragment: null },
-  { reading: null, fragment: "The Mouse and the" },
-  { reading: null, fragment: null },
-  { reading: { title: "Harry Potter and the Deathly Hallows", author: "J. K. Rowling" }, fragment: null },
-  { reading: { title: "Boxcar Children Special Edition", author: null }, fragment: null },
-  { reading: null, fragment: null },
+  { reading: { title: "The Alchemist", author: "Paulo Coelho" }, fragment: null, copies: 1 },
+  { reading: null, fragment: "The Mouse and the", copies: 1 },
+  { reading: null, fragment: null, copies: 1 },
+  { reading: { title: "Harry Potter and the Deathly Hallows", author: "J. K. Rowling" }, fragment: null, copies: 1 },
+  { reading: { title: "Boxcar Children Special Edition", author: null }, fragment: null, copies: 1 },
+  { reading: null, fragment: null, copies: 1 },
+];
+
+/**
+ * The same shelf on a second look, for when a teacher's count says the first came up
+ * short. It finds a second copy of The Alchemist, a thin book the first missed (Frog and
+ * Toad, beside it), and one more spine it can see but not read; and, as a real second look
+ * can, it drops Deathly Hallows, which the merge has to put back. Nine books in all, so a
+ * count of ten still leaves one the photo shows no sign of.
+ */
+export const FIXTURE_SECOND_LOOK: SpineSighting[] = [
+  { reading: { title: "The Alchemist", author: "Paulo Coelho" }, fragment: null, copies: 2 },
+  { reading: { title: "Frog and Toad Are Friends", author: "Arnold Lobel" }, fragment: null, copies: 1 },
+  { reading: null, fragment: "The Mouse and the", copies: 1 },
+  { reading: null, fragment: null, copies: 1 },
+  { reading: { title: "Boxcar Children Special Edition", author: null }, fragment: null, copies: 1 },
+  { reading: null, fragment: null, copies: 1 },
+  { reading: null, fragment: null, copies: 1 },
 ];
 
 /**
@@ -29,6 +46,9 @@ const FIXTURE_CATALOGUE: Record<string, { title: string; author_name: string[]; 
   "the alchemist": [
     { title: "The Alchemist", author_name: ["Paulo Coelho"], isbn: ["9780062315007"] },
     { title: "The Alchemist", author_name: ["Paulo Coelho"], isbn: ["9780061122415"] },
+  ],
+  "frog and toad are friends": [
+    { title: "Frog and Toad Are Friends", author_name: ["Arnold Lobel"], isbn: ["9780064440202"] },
   ],
   "harry potter and the deathly hallows": [
     { title: "Harry Potter and the Deathly Hallows", author_name: ["J. K. Rowling"], isbn: ["9780545010221"] },

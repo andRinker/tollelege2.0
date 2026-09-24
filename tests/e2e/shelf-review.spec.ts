@@ -167,3 +167,50 @@ test("a teacher fills the gaps by typing, by scanning and by hand", async ({ pag
     await expect(page.getByText("5 titles · 5 copies")).toBeVisible();
   });
 });
+
+/**
+ * With a count, the canned shelf comes up short (six books against ten), so it takes the
+ * second look in `fixtures.ts`: a second Alchemist, a thin Frog and Toad, one more
+ * unreadable spine, and Deathly Hallows dropped, which the merge must put back. Nine books
+ * in all, so one of the ten is still nowhere in the photo.
+ */
+test("a count the photo falls short of earns a second look, and says what's still missing", async ({ page }) => {
+  await signUp(page, "Tomasz Lind");
+  await page.goto("/library/add");
+  await page.getByRole("button", { name: "Photograph a shelf" }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("textbox", { name: /How many books on this shelf/ }).fill("10");
+  await dialog.locator('input[type="file"]').last().setInputFiles({ name: "shelf.jpg", mimeType: "image/jpeg", buffer: TINY_JPEG });
+
+  await test.step("it measures the photo against the count", async () => {
+    await expect(dialog.getByText(/^Found 9 of the 10 books you counted\. A second look found 3 of them\./)).toBeVisible({
+      timeout: 40_000,
+    });
+  });
+
+  await test.step("a book only the second look found waits for a deliberate yes", async () => {
+    const frog = row(page, "Found on a second look");
+    await expect(frog.getByText("Frog and Toad Are Friends")).toBeVisible();
+    await expect(frog.getByRole("checkbox")).not.toBeChecked();
+  });
+
+  await test.step("copies count, and a book the second look dropped is still there", async () => {
+    await expect(row(page, "2 copies on the shelf").getByText("The Alchemist")).toBeVisible();
+    await expect(row(page, "Match").filter({ hasText: "Deathly Hallows" })).toHaveCount(1);
+  });
+
+  await test.step("the one it never saw is a row to fill like any other", async () => {
+    const missing = row(page, "Not found in the photo");
+    await expect(missing).toHaveCount(1);
+    await expect(missing.getByText("Somewhere on this shelf; the photo showed no sign of it")).toBeVisible();
+    for (const name of ["Scan it", "Type ISBN", "By hand"]) {
+      await expect(missing.getByRole("button", { name })).toBeVisible();
+    }
+  });
+
+  await test.step("confirming a row of copies adds every copy", async () => {
+    // Two Alchemists and one Hallows; Frog and Toad waits unticked.
+    await dialog.getByRole("button", { name: "Add 3" }).click();
+    await expect(snackbar(page, "Added 2 books and 1 copy from the shelf.")).toBeVisible({ timeout: 30_000 });
+  });
+});

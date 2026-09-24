@@ -19,7 +19,7 @@ import {
 import type { ReadingLevelSystem } from "@/db/schema/enums";
 import { formatIsbn13, normalizeIsbn } from "@/lib/isbn";
 import type { QuickAddResult } from "@/server/catalog";
-import type { ShelfSlot } from "@/server/shelf-scan";
+import type { ShelfSlot, ShelfTally } from "@/server/shelf-scan";
 import { cx } from "@/ui/cx";
 import { Button, LinkButton } from "@/ui/components/button";
 import { Dialog } from "@/ui/components/dialog";
@@ -96,7 +96,7 @@ export function AddBooks({ readingLevelSystem, suggestions, pairedPhones, scanCu
   const [manual, setManual] = useState<BookFormValue | null>(null);
   const [shelfOpen, setShelfOpen] = useState(false);
   const [phoneScanning, setPhoneScanning] = useState(false);
-  const [incomingShelf, setIncomingShelf] = useState<{ slots: ShelfSlot[]; at: number } | null>(null);
+  const [incomingShelf, setIncomingShelf] = useState<{ slots: ShelfSlot[]; tally?: ShelfTally; at: number } | null>(null);
   /**
    * A gap in the shelf review waiting for the next scan. It lives here rather than in the
    * dialog because this is where scans arrive — from the phone, the USB wedge or the
@@ -180,7 +180,7 @@ export function AddBooks({ readingLevelSystem, suggestions, pairedPhones, scanCu
         // A new shelf resets everything the last one was waiting on.
         setArmedGap(null);
         setGapFills({});
-        setIncomingShelf({ slots: event.payload.slots, at: event.seq });
+        setIncomingShelf({ slots: event.payload.slots, tally: event.payload.tally, at: event.seq });
         setShelfOpen(true);
       }
     }
@@ -350,7 +350,7 @@ export function AddBooks({ readingLevelSystem, suggestions, pairedPhones, scanCu
           setShelfOpen(open);
           if (!open) setArmedGap(null);
         }}
-        incoming={incomingShelf?.slots ?? null}
+        incoming={incomingShelf ?? undefined}
         armedPosition={armedGap}
         onArm={setArmedGap}
         gapResults={gapFills}

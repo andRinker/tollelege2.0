@@ -1,12 +1,14 @@
 import "server-only";
 import { type MatchCandidate, type SpineMatch, matchSpine } from "./match";
 import { findOwned, type OwnedBook, type OwnedCandidate } from "./owned";
-import { readSpines, type SpineReading } from "./vision";
+import { mergeLooks, spinesSeen } from "./second-look";
+import { readSpines, type SpineReading, ShelfScanUnavailableError } from "./vision";
 
 export type { MatchCandidate, MatchConfidence, SpineMatch } from "./match";
 export type { OwnedBook, OwnedCandidate } from "./owned";
 export type { SpineReading, SpineSighting } from "./vision";
 export { shelfScanConfigured, ShelfScanUnavailableError } from "./vision";
+export { mergeLooks } from "./second-look";
 
 /** Catalogue searches run in parallel, but not sixty at once. */
 const CONCURRENCY = 6;
@@ -46,6 +48,24 @@ export type ShelfSlot = {
   reading: SpineReading | null;
   fragment: string | null;
   proposal: ShelfProposal | null;
+  /** Identical spines this row stands for; confirming it adds that many copies. */
+  copies: number;
+  /** Seen only on a second look, after the teacher's count said the first missed some. */
+  secondLook: boolean;
+};
+
+/**
+ * The teacher's count against what the photo showed. `seen` counts every copy, so a shelf
+ * with two of a book reads as two books, which is how the teacher counted it.
+ */
+export type ShelfTally = {
+  /** Books the teacher said were on the shelf, or null when they didn't say. */
+  expected: number | null;
+  seen: number;
+  /** Books the teacher counted that the photo showed no sign of. */
+  missing: number;
+  /** Books the second look added to the first reading's count. */
+  foundOnSecondLook: number;
 };
 
 export type ShelfScan = {
@@ -53,7 +73,14 @@ export type ShelfScan = {
   slots: ShelfSlot[];
   /** Slots with no book on them, which is the count worth telling a teacher. */
   needsAttention: number;
+  tally: ShelfTally;
 };
+
+/** A count a teacher could plausibly mean for one shelf, or null. */
+export function parseShelfCount(value: unknown): number | null {
+  const count = Number(typeof value === "string" ? value.trim() : value);
+  return Number.isInteger(count) && count >= 1 && count <= 200 ? count : null;
+}
 
 async function inBatches<In, Out>(items: In[], size: number, run: (item: In) => Promise<Out>): Promise<Out[]> {
   const results: Out[] = [];
@@ -72,15 +99,42 @@ async function inBatches<In, Out>(items: In[], size: number, run: (item: In) => 
  */
 export async function scanShelf(
   image: { data: ArrayBuffer; mimeType: string },
-  options: { owned?: readonly OwnedCandidate[]; fetchFn?: typeof fetch } = {},
+  options: {
+    owned?: readonly OwnedCandidate[];
+    fetchFn?: typeof fetch;
+    /** How many books the teacher counted on the shelf, if they did. */
+    expected?: number | null;
+  } = {},
 ): Promise<ShelfScan> {
   const owned = options.owned ?? [];
   const fetchFn =
     options.fetchFn ??
     (process.env.SHELF_SCAN_FIXTURES === "1" ? (await import("./fixtures")).createShelfFixtureFetch() : fetch);
 
-  const sightings = await readSpines(image, fetchFn);
-  if (sightings.length === 0) return { slots: [], needsAttention: 0 };
+  const expected = options.expected ?? null;
+  const first = await readSpines(image, fetchFn);
+  let sightings = mergeLooks(first, []);
+
+  // Short of the teacher's count: one more look, with the first reading to go on. It is
+  // best-effort, so a failure keeps the first reading rather than losing the whole scan.
+  // An empty first reading is a photo with no shelf in it, and a count is no help there.
+  if (expected !== null && first.length > 0 && spinesSeen(first) < expected) {
+    try {
+      sightings = mergeLooks(first, await readSpines(image, fetchFn, { expected, previous: first }));
+    } catch (error) {
+      if (!(error instanceof ShelfScanUnavailableError)) throw error;
+      console.warn(`Shelf scan second look unavailable: ${error.message}`);
+    }
+  }
+
+  const seen = spinesSeen(sightings);
+  const tally: ShelfTally = {
+    expected,
+    seen,
+    missing: expected !== null ? Math.max(0, expected - seen) : 0,
+    foundOnSecondLook: seen - spinesSeen(first),
+  };
+  if (sightings.length === 0) return { slots: [], needsAttention: 0, tally };
 
   // Only the spines that were actually read cost a catalogue search; the rest already
   // know they need a human, and their place in the row is the useful thing about them.
@@ -97,10 +151,12 @@ export async function scanShelf(
       reading: sighting.reading,
       fragment: sighting.fragment,
       proposal: match && match.candidates.length > 0 ? { ...match, owned: findOwned(match, owned) } : null,
+      copies: sighting.copies,
+      secondLook: sighting.secondLook,
     };
   });
 
-  return { slots, needsAttention: slots.filter((slot) => slot.proposal === null).length };
+  return { slots, needsAttention: slots.filter((slot) => slot.proposal === null).length, tally };
 }
 
 /** The suggestion a teacher sees first, or null when nothing matched that spine. */

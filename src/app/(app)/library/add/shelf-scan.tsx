@@ -4,7 +4,7 @@ import { useState } from "react";
 import { BookCover } from "@/components/book-cover";
 import { preparePhoto } from "@/components/prepare-photo";
 import { describeGap } from "@/lib/shelf-gaps";
-import type { MatchCandidate, ShelfSlot } from "@/server/shelf-scan";
+import type { MatchCandidate, ShelfScan, ShelfSlot, ShelfTally } from "@/server/shelf-scan";
 import { cx } from "@/ui/cx";
 import { Button } from "@/ui/components/button";
 import { Dialog } from "@/ui/components/dialog";
@@ -12,6 +12,7 @@ import { Icon } from "@/ui/components/icon";
 import { LoadingIndicator } from "@/ui/components/loading-indicator";
 import { Menu, MenuItem, MenuTrigger } from "@/ui/components/menu";
 import { Checkbox } from "@/ui/components/selection-controls";
+import { ShelfCountField } from "@/components/shelf-count-field";
 import { useSnackbar } from "@/ui/components/snackbar";
 import { TextField } from "@/ui/components/text-field";
 import {
@@ -36,7 +37,7 @@ type Row = {
 type State =
   | { kind: "idle" }
   | { kind: "reading" }
-  | { kind: "review"; rows: Row[] }
+  | { kind: "review"; rows: Row[]; tally: ShelfTally }
   | { kind: "adding"; done: number; total: number }
   | { kind: "error"; message: string };
 
@@ -63,22 +64,34 @@ const CONFIDENCE_LABEL: Record<MatchCandidate["confidence"], { text: string; cla
  * order so the list reads like the shelf: the row for a spine nobody could read sits
  * physically between its neighbours, which is most of the explanation it needs.
  */
-function reviewFrom(slots: ShelfSlot[]): State {
+function reviewFrom(scan: Pick<ShelfScan, "slots"> & Partial<Pick<ShelfScan, "tally">>): State {
+  // A shelf a phone sent before copies and counts existed has neither; read it as one copy
+  // a spine, with no count to check against.
+  const slots = scan.slots.map((slot) => ({ ...slot, copies: slot.copies ?? 1, secondLook: slot.secondLook ?? false }));
+  const seen = slots.reduce((total, slot) => total + slot.copies, 0);
   return {
     kind: "review",
+    tally: scan.tally ?? { expected: null, seen, missing: 0, foundOnSecondLook: 0 },
     rows: slots.map((slot) => ({
       slot,
       chosen: 0,
-      // Three kinds of row start unticked: a doubtful match, so nothing wrong is added by
+      // Four kinds of row start unticked: a doubtful match, so nothing wrong is added by
       // simply not looking; a book already on the shelves, since re-photographing a
-      // catalogued shelf should not silently multiply its copies; and a gap, which has
-      // nothing to tick in the first place.
+      // catalogued shelf should not silently multiply its copies; a book only a second
+      // look found, since a count is exactly what could talk the reader into one; and a
+      // gap, which has nothing to tick in the first place.
       selected:
         slot.proposal !== null &&
         slot.proposal.candidates[0].confidence !== "weak" &&
-        !slot.proposal.owned,
+        !slot.proposal.owned &&
+        !slot.secondLook,
     })),
   };
+}
+
+/** Books the selected rows stand for, counting every copy of a folded row. */
+function selectedBooks(rows: Row[]): number {
+  return rows.reduce((total, row) => total + (row.selected ? row.slot.copies : 0), 0);
 }
 
 type ShelfScanDialogProps = {
@@ -88,7 +101,7 @@ type ShelfScanDialogProps = {
    * Slots that arrived from a paired phone, to review instead of taking a photo here.
    * The caller remounts on each new shelf, so this is only ever read once.
    */
-  incoming?: ShelfSlot[] | null;
+  incoming?: Pick<ShelfScan, "slots"> & Partial<Pick<ShelfScan, "tally">>;
   /** The gap waiting for the next scan, if any. Owned above, since scans arrive there. */
   armedPosition: number | null;
   onArm: (position: number | null) => void;
@@ -115,10 +128,11 @@ export function ShelfScanDialog({
     setState({ kind: "idle" });
   }
 
-  async function scan(file: File) {
+  async function scan(file: File, count: string) {
     setState({ kind: "reading" });
     const data = new FormData();
     data.set("photo", await preparePhoto(file));
+    if (count.trim()) data.set("expected", count.trim());
     const result = await scanShelfAction(data);
 
     if (result.status === "unconfigured") {
@@ -129,29 +143,38 @@ export function ShelfScanDialog({
       setState({ kind: "error", message: result.message });
       return;
     }
-    setState(reviewFrom(result.slots));
+    setState(reviewFrom(result));
   }
 
   async function addSelected(rows: Row[], close: () => void) {
     const chosen = rows.filter((row) => row.selected && row.slot.proposal);
-    setState({ kind: "adding", done: 0, total: chosen.length });
+    const total = selectedBooks(chosen);
+    setState({ kind: "adding", done: 0, total });
 
     let added = 0;
     let copied = 0;
     let failed = 0;
-    for (const [index, row] of chosen.entries()) {
+    let done = 0;
+    for (const row of chosen) {
       const proposal = row.slot.proposal as NonNullable<ShelfSlot["proposal"]>;
-      if (proposal.owned) {
-        // Already catalogued, so this is another physical copy of a book that exists.
-        const result = await addCopyAction(proposal.owned.bookId);
-        if (result.ok) copied += 1;
-        else failed += 1;
-      } else {
-        const result = await quickAddAction(proposal.candidates[row.chosen].isbn13);
-        if (result.status === "added") added += 1;
-        else failed += 1;
+      // One row can stand for several identical spines; each is a copy on the shelf.
+      for (let copy = 0; copy < row.slot.copies; copy++) {
+        if (proposal.owned) {
+          // Already catalogued, so this is another physical copy of a book that exists.
+          const result = await addCopyAction(proposal.owned.bookId);
+          if (result.ok) copied += 1;
+          else failed += 1;
+        } else {
+          // The first adds the book; any more are further copies of it, which is what the
+          // ordinary scan path does with an ISBN the library already has.
+          const result = await quickAddAction(proposal.candidates[row.chosen].isbn13);
+          if (result.status !== "added") failed += 1;
+          else if (result.result.outcome === "copy_added") copied += 1;
+          else added += 1;
+        }
+        done += 1;
+        setState({ kind: "adding", done, total });
       }
-      setState({ kind: "adding", done: index + 1, total: chosen.length });
     }
 
     close();
@@ -190,14 +213,14 @@ export function ShelfScanDialog({
               isDisabled={!state.rows.some((row) => row.selected)}
               onPress={() => void addSelected(state.rows, close)}
             >
-              {`Add ${state.rows.filter((row) => row.selected).length}`}
+              {`Add ${selectedBooks(state.rows)}`}
             </Button>
           </>
         ) : undefined
       }
     >
       <div className="flex min-h-0 flex-col gap-4">
-        {state.kind === "idle" && <PhotoPicker onPick={(file) => void scan(file)} />}
+        {state.kind === "idle" && <PhotoPicker onPick={(file, count) => void scan(file, count)} />}
 
         {state.kind === "reading" && (
           <div className="grid place-items-center gap-3 py-12">
@@ -226,6 +249,7 @@ export function ShelfScanDialog({
         {state.kind === "review" && (
           <ReviewList
             rows={state.rows}
+            tally={state.tally}
             onChange={(rows) => setState({ ...state, rows })}
             armedPosition={armedPosition}
             onArm={onArm}
@@ -239,13 +263,15 @@ export function ShelfScanDialog({
   );
 }
 
-function PhotoPicker({ onPick }: { onPick: (file: File) => void }) {
+function PhotoPicker({ onPick }: { onPick: (file: File, count: string) => void }) {
+  const [count, setCount] = useState("");
   return (
-    <div className="flex flex-col gap-4 py-2">
+    <div className="flex flex-col gap-4 py-2 [--field-bg:var(--md-sys-color-surface-container-high)]">
       <p className="text-body-md text-on-surface-variant">
         Take one photo of a single shelf, straight on, with the spines readable. Every book it finds is a suggestion
         you confirm — nothing is added until you say so.
       </p>
+      <ShelfCountField value={count} onChange={setCount} />
       <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg bg-primary px-6 py-4 text-label-lg text-on-primary">
         <Icon icon={iconPhotoCamera} size={20} />
         Take a photo
@@ -256,7 +282,7 @@ function PhotoPicker({ onPick }: { onPick: (file: File) => void }) {
           className="sr-only"
           onChange={(event) => {
             const file = event.target.files?.[0];
-            if (file) onPick(file);
+            if (file) onPick(file, count);
             event.target.value = "";
           }}
         />
@@ -269,7 +295,7 @@ function PhotoPicker({ onPick }: { onPick: (file: File) => void }) {
           className="sr-only"
           onChange={(event) => {
             const file = event.target.files?.[0];
-            if (file) onPick(file);
+            if (file) onPick(file, count);
             event.target.value = "";
           }}
         />
@@ -278,8 +304,20 @@ function PhotoPicker({ onPick }: { onPick: (file: File) => void }) {
   );
 }
 
+/** What the photo showed, measured against the teacher's count when there is one. */
+function describeTally(tally: ShelfTally): string | null {
+  const { expected, seen, foundOnSecondLook } = tally;
+  if (expected === null) return null;
+  const again = foundOnSecondLook > 0 ? ` A second look found ${foundOnSecondLook} of them.` : "";
+  if (seen === expected) return `Found all ${expected} books you counted.${again}`;
+  if (seen < expected) return `Found ${seen} of the ${expected} books you counted.${again}`;
+  const extra = seen - expected;
+  return `Found ${seen}; you counted ${expected}, so ${extra === 1 ? "one may have been" : `${extra} may have been`} read twice.${again}`;
+}
+
 function ReviewList({
   rows,
+  tally,
   onChange,
   armedPosition,
   onArm,
@@ -288,6 +326,7 @@ function ReviewList({
   onAddByHand,
 }: {
   rows: Row[];
+  tally: ShelfTally;
   onChange: (rows: Row[]) => void;
   armedPosition: number | null;
   onArm: (position: number | null) => void;
@@ -315,9 +354,130 @@ function ReviewList({
   );
 
   const books = rows.filter((row) => !isGap(row)).length;
-  const outstanding = rows.filter((row) => isGap(row) && !gapResults[row.slot.position]).length;
+  // Books the teacher counted that the photo showed no trace of. They have no place on the
+  // shelf to be described by, so they follow the shelf's own rows, numbered after them.
+  const missing = Array.from({ length: tally.missing }, (_, index) => rows.length + index);
+  const outstanding =
+    rows.filter((row) => isGap(row) && !gapResults[row.slot.position]).length +
+    missing.filter((position) => !gapResults[position]).length;
+  const tallyText = describeTally(tally);
 
-  if (rows.length === 0) {
+  /** A row with no book on it yet, from the shelf or from the count: the same three ways to fill it. */
+  function gapRow({
+    position,
+    title,
+    note,
+    detail,
+    handTitle,
+  }: {
+    position: number;
+    title: string;
+    note: string;
+    detail: string | null;
+    handTitle: string;
+  }) {
+    const filled = gapResults[position];
+    return (
+          <li
+            key={`gap-${position}`}
+            className={cx(
+              "flex flex-col gap-2 rounded-lg border border-dashed px-3 py-2",
+              filled ? "border-transparent bg-surface-container" : "border-outline-variant",
+            )}
+          >
+            <div className="flex items-center gap-3">
+              <Icon
+                icon={filled ? iconCheckCircle : iconHelp}
+                size={20}
+                className={filled ? "text-primary" : "text-on-surface-variant"}
+              />
+              <div className="min-w-0 grow">
+                <p className="truncate text-body-lg">
+                  {filled ? filled.title : title}
+                </p>
+                <p className="truncate text-body-sm text-on-surface-variant">
+                  {filled ? filled.note : note}
+                </p>
+                {!filled && detail && <p className="truncate text-label-sm text-on-surface-variant">{detail}</p>}
+              </div>
+            </div>
+
+            {!filled &&
+              (armedPosition === position ? (
+                <div className="flex items-center gap-2 pl-8">
+                  <span className="flex items-center gap-2 text-body-sm text-primary">
+                    <Icon icon={iconBarcodeScanner} size={18} />
+                    Scan this one now, with your phone or a barcode scanner.
+                  </span>
+                  <Button variant="text" size="xs" onPress={() => onArm(null)}>
+                    Cancel
+                  </Button>
+                </div>
+              ) : typingAt === position ? (
+                <form
+                  className="flex items-end gap-2 pl-8"
+                  onSubmit={async (event) => {
+                    event.preventDefault();
+                    const message = await onFillGap(position, typed);
+                    if (message) {
+                      setGapError({ position, message });
+                      return;
+                    }
+                    setGapError(null);
+                    setTypingAt(null);
+                    setTyped("");
+                  }}
+                >
+                  <TextField
+                    label="ISBN"
+                    value={typed}
+                    onChange={(value) => setTyped(value)}
+                    inputMode="numeric"
+                    autoComplete="off"
+                    autoFocus
+                    className="grow"
+                    inputClassName="tabular-nums"
+                    isInvalid={gapError?.position === position}
+                    errorMessage={gapError?.position === position ? gapError.message : undefined}
+                  />
+                  <Button type="submit" size="sm">
+                    Add
+                  </Button>
+                  <Button variant="text" size="sm" onPress={() => setTypingAt(null)}>
+                    Cancel
+                  </Button>
+                </form>
+              ) : (
+                <div className="flex flex-wrap gap-1 pl-8">
+                  <Button variant="tonal" size="xs" icon={iconBarcodeScanner} onPress={() => onArm(position)}>
+                    Scan it
+                  </Button>
+                  <Button
+                    variant="text"
+                    size="xs"
+                    onPress={() => {
+                      setTypingAt(position);
+                      setTyped("");
+                      setGapError(null);
+                    }}
+                  >
+                    Type ISBN
+                  </Button>
+                  <Button
+                    variant="text"
+                    size="xs"
+                    icon={iconEdit}
+                    onPress={() => onAddByHand(position, handTitle)}
+                  >
+                    By hand
+                  </Button>
+                </div>
+              ))}
+          </li>
+    );
+  }
+
+  if (rows.length === 0 && missing.length === 0) {
     return (
       <div className="flex flex-col items-center gap-3 py-10 text-center">
         <Icon icon={iconError} size={40} className="text-on-surface-variant" />
@@ -337,7 +497,7 @@ function ReviewList({
       data-barcode-wedge={armedPosition !== null ? "" : undefined}
     >
       <p className="text-body-md text-on-surface-variant">
-        {`Found ${books} ${books === 1 ? "book" : "books"}. `}
+        {tallyText ? `${tallyText} ` : `Found ${books} ${books === 1 ? "book" : "books"}. `}
         {outstanding > 0 ? (
           <span className="text-on-surface">
             {`${outstanding} ${outstanding === 1 ? "spine needs" : "spines need"} you.`}
@@ -352,110 +512,14 @@ function ReviewList({
           const position = row.slot.position;
 
           if (isGap(row)) {
-            const filled = gapResults[position];
             const readTitle = row.slot.reading?.title ?? null;
-            return (
-              <li
-                key={`gap-${position}`}
-                className={cx(
-                  "flex flex-col gap-2 rounded-lg border border-dashed px-3 py-2",
-                  filled ? "border-transparent bg-surface-container" : "border-outline-variant",
-                )}
-              >
-                <div className="flex items-center gap-3">
-                  <Icon
-                    icon={filled ? iconCheckCircle : iconHelp}
-                    size={20}
-                    className={filled ? "text-primary" : "text-on-surface-variant"}
-                  />
-                  <div className="min-w-0 grow">
-                    <p className="truncate text-body-lg">
-                      {filled ? filled.title : (readTitle ?? "Couldn't read this spine")}
-                    </p>
-                    <p className="truncate text-body-sm text-on-surface-variant">
-                      {filled ? filled.note : describeGap(titles, index)}
-                    </p>
-                    {!filled && (readTitle || row.slot.fragment) && (
-                      <p className="truncate text-label-sm text-on-surface-variant">
-                        {readTitle ? "No catalogue had this one" : `Could make out: ${row.slot.fragment}`}
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                {!filled &&
-                  (armedPosition === position ? (
-                    <div className="flex items-center gap-2 pl-8">
-                      <span className="flex items-center gap-2 text-body-sm text-primary">
-                        <Icon icon={iconBarcodeScanner} size={18} />
-                        Scan this one now, with your phone or a barcode scanner.
-                      </span>
-                      <Button variant="text" size="xs" onPress={() => onArm(null)}>
-                        Cancel
-                      </Button>
-                    </div>
-                  ) : typingAt === position ? (
-                    <form
-                      className="flex items-end gap-2 pl-8"
-                      onSubmit={async (event) => {
-                        event.preventDefault();
-                        const message = await onFillGap(position, typed);
-                        if (message) {
-                          setGapError({ position, message });
-                          return;
-                        }
-                        setGapError(null);
-                        setTypingAt(null);
-                        setTyped("");
-                      }}
-                    >
-                      <TextField
-                        label="ISBN"
-                        value={typed}
-                        onChange={(value) => setTyped(value)}
-                        inputMode="numeric"
-                        autoComplete="off"
-                        autoFocus
-                        className="grow"
-                        inputClassName="tabular-nums"
-                        isInvalid={gapError?.position === position}
-                        errorMessage={gapError?.position === position ? gapError.message : undefined}
-                      />
-                      <Button type="submit" size="sm">
-                        Add
-                      </Button>
-                      <Button variant="text" size="sm" onPress={() => setTypingAt(null)}>
-                        Cancel
-                      </Button>
-                    </form>
-                  ) : (
-                    <div className="flex flex-wrap gap-1 pl-8">
-                      <Button variant="tonal" size="xs" icon={iconBarcodeScanner} onPress={() => onArm(position)}>
-                        Scan it
-                      </Button>
-                      <Button
-                        variant="text"
-                        size="xs"
-                        onPress={() => {
-                          setTypingAt(position);
-                          setTyped("");
-                          setGapError(null);
-                        }}
-                      >
-                        Type ISBN
-                      </Button>
-                      <Button
-                        variant="text"
-                        size="xs"
-                        icon={iconEdit}
-                        onPress={() => onAddByHand(position, readTitle ?? "")}
-                      >
-                        By hand
-                      </Button>
-                    </div>
-                  ))}
-              </li>
-            );
+            return gapRow({
+              position,
+              title: readTitle ?? "Couldn't read this spine",
+              note: describeGap(titles, index),
+              detail: readTitle ? "No catalogue had this one" : row.slot.fragment ? `Could make out: ${row.slot.fragment}` : null,
+              handTitle: readTitle ?? "",
+            });
           }
 
           const proposal = row.slot.proposal as NonNullable<ShelfSlot["proposal"]>;
@@ -487,6 +551,12 @@ function ReviewList({
                   {candidate.authors.join(", ") || row.slot.reading?.author || "Unknown author"}
                 </p>
                 <p className={cx("text-label-sm", label.className)}>{label.text}</p>
+                {row.slot.copies > 1 && (
+                  <p className="text-label-sm text-on-surface-variant">{`${row.slot.copies} copies on the shelf — ticking adds ${row.slot.copies}`}</p>
+                )}
+                {row.slot.secondLook && (
+                  <p className="text-label-sm text-tertiary">Found on a second look — check it&rsquo;s really there</p>
+                )}
               </div>
               {!owned && proposal.candidates.length > 1 && (
                 <MenuTrigger>
@@ -512,6 +582,15 @@ function ReviewList({
             </li>
           );
         })}
+        {missing.map((position) =>
+          gapRow({
+            position,
+            title: "Not found in the photo",
+            note: "Somewhere on this shelf; the photo showed no sign of it",
+            detail: null,
+            handTitle: "",
+          }),
+        )}
       </ul>
     </div>
   );
