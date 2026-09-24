@@ -71,7 +71,12 @@ const CONFIDENCE_LABEL: Record<MatchCandidate["confidence"], { text: string; cla
 function reviewFrom(scan: Pick<ShelfScan, "slots"> & Partial<Pick<ShelfScan, "tally" | "otherShelf">>): State {
   // A shelf a phone sent before copies and counts existed has neither; read it as one copy
   // a spine, with no count to check against.
-  const slots = scan.slots.map((slot) => ({ ...slot, copies: slot.copies ?? 1, secondLook: slot.secondLook ?? false }));
+  const slots = scan.slots.map((slot) => ({
+    ...slot,
+    copies: slot.copies ?? 1,
+    secondLook: slot.secondLook ?? false,
+    partial: slot.partial ?? null,
+  }));
   const seen = slots.reduce((total, slot) => total + slot.copies, 0);
   return {
     kind: "review",
@@ -80,16 +85,18 @@ function reviewFrom(scan: Pick<ShelfScan, "slots"> & Partial<Pick<ShelfScan, "ta
     rows: slots.map((slot) => ({
       slot,
       chosen: 0,
-      // Four kinds of row start unticked: a doubtful match, so nothing wrong is added by
+      // Five kinds of row start unticked: a doubtful match, so nothing wrong is added by
       // simply not looking; a book already on the shelves, since re-photographing a
       // catalogued shelf should not silently multiply its copies; a book only a second
-      // look found, since a count is exactly what could talk the reader into one; and a
-      // gap, which has nothing to tick in the first place.
+      // look found, since a count is exactly what could talk the reader into one; a spine
+      // only partly read, whose book is taken from the one beside it; and a gap, which has
+      // nothing to tick in the first place.
       selected:
         slot.proposal !== null &&
         slot.proposal.candidates[0].confidence !== "weak" &&
         !slot.proposal.owned &&
-        !slot.secondLook,
+        !slot.secondLook &&
+        slot.partial === null,
     })),
   };
 }
@@ -236,7 +243,7 @@ export function ShelfScanDialog({
             <LoadingIndicator contained label="Reading the shelf" />
             <p className="text-body-md text-on-surface-variant">Reading the spines…</p>
             {/* A thorough reading of a full shelf takes a while; say so, so it isn't taken for a hang. */}
-            <p className="text-body-sm text-on-surface-variant">A full shelf can take up to a minute.</p>
+            <p className="text-body-sm text-on-surface-variant">A full shelf can take a minute or two.</p>
           </div>
         )}
 
@@ -576,6 +583,9 @@ function ReviewList({
                 )}
                 {row.slot.secondLook && (
                   <p className="text-label-sm text-tertiary">Found on a second look — check it&rsquo;s really there</p>
+                )}
+                {row.slot.partial !== null && (
+                  <p className="text-label-sm text-tertiary">{`Only “${row.slot.partial}” was legible — probably another copy of the book beside it`}</p>
                 )}
               </div>
               {!owned && proposal.candidates.length > 1 && (
