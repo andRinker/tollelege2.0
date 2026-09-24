@@ -1,8 +1,8 @@
 import "server-only";
 import { type MatchCandidate, type SpineMatch, matchSpine } from "./match";
 import { findOwned, type OwnedBook, type OwnedCandidate } from "./owned";
-import { mergeLooks, spinesSeen } from "./second-look";
-import { readShelf, type ShelfScanFailure, type SpineReading, ShelfScanUnavailableError } from "./vision";
+import { mergeLooks, spinesSeen, tidyShelf } from "./second-look";
+import { readShelf, type ShelfScanFailure, spineKey, type SpineReading, ShelfScanUnavailableError } from "./vision";
 
 export type { MatchCandidate, MatchConfidence, SpineMatch } from "./match";
 export type { OwnedBook, OwnedCandidate } from "./owned";
@@ -10,12 +10,12 @@ export type { SpineReading, SpineSighting } from "./vision";
 export { type ShelfScanFailure, shelfScanConfigured, ShelfScanUnavailableError } from "./vision";
 
 /**
- * A scan runs inside one request, which the host stops at 120 seconds. The readings get
- * the first 95 of them, leaving the rest for matching every spine against the catalogues;
+ * A scan runs inside one request, which the host stops at 180 seconds. The readings get
+ * the first 130 of them, leaving the rest for matching every spine against the catalogues;
  * a second look only starts if enough is left for a thorough reading to finish.
  */
-const READING_BUDGET_MS = 95_000;
-const SECOND_LOOK_NEEDS_MS = 35_000;
+const READING_BUDGET_MS = 130_000;
+const SECOND_LOOK_NEEDS_MS = 45_000;
 
 /** What a teacher is told when the reader fails, by why it failed. */
 export function describeShelfFailure(reason: ShelfScanFailure): string {
@@ -32,7 +32,7 @@ export function describeShelfFailure(reason: ShelfScanFailure): string {
       return "Shelf photos aren't set up on this site yet.";
   }
 }
-export { mergeLooks } from "./second-look";
+export { mergeLooks, tidyShelf } from "./second-look";
 
 /** Catalogue searches run in parallel, but not sixty at once. */
 const CONCURRENCY = 6;
@@ -76,6 +76,11 @@ export type ShelfSlot = {
   copies: number;
   /** Seen only on a second look, after the teacher's count said the first missed some. */
   secondLook: boolean;
+  /**
+   * Set when the spine was only partly legible and its book was taken from the copy beside
+   * it: what was legible. A suggestion to check, so it starts unticked.
+   */
+  partial: string | null;
 };
 
 /**
@@ -160,6 +165,7 @@ export async function scanShelf(
     }
   }
 
+  sightings = tidyShelf(sightings);
   const seen = spinesSeen(sightings);
   const tally: ShelfTally = {
     expected,
@@ -171,14 +177,22 @@ export async function scanShelf(
 
   // Only the spines that were actually read cost a catalogue search; the rest already
   // know they need a human, and their place in the row is the useful thing about them.
-  const readable = sightings.flatMap((sighting, index) => (sighting.reading ? [index] : []));
-  const matches = await inBatches(readable, CONCURRENCY, (index) =>
-    matchSpine(sightings[index].reading as SpineReading, fetchFn),
-  );
-  const matchAt = new Map(readable.map((index, nth) => [index, matches[nth]]));
+  // A title on the shelf twice (a partly read copy beside its twin) is searched once.
+  const readings = new Map<string, SpineReading>();
+  for (const sighting of sightings) {
+    if (sighting.reading) readings.set(spineKey(sighting.reading), sighting.reading);
+  }
+  const keys = [...readings.keys()];
+  const matches = await inBatches(keys, CONCURRENCY, (key) => matchSpine(readings.get(key) as SpineReading, fetchFn));
+  const matchFor = new Map(keys.map((key, nth) => [key, matches[nth]]));
 
   const slots: ShelfSlot[] = sightings.map((sighting, position) => {
-    const match = matchAt.get(position);
+    const match = sighting.reading ? matchFor.get(spineKey(sighting.reading)) : undefined;
+    // A partly read spine borrowed its title from the book beside it, which is only a help
+    // if that book was found; otherwise it goes back to being a gap with what was legible.
+    if (sighting.partial !== null && !match?.candidates.length) {
+      return { position, reading: null, fragment: sighting.partial, proposal: null, copies: sighting.copies, secondLook: sighting.secondLook, partial: null };
+    }
     return {
       position,
       reading: sighting.reading,
@@ -186,6 +200,7 @@ export async function scanShelf(
       proposal: match && match.candidates.length > 0 ? { ...match, owned: findOwned(match, owned) } : null,
       copies: sighting.copies,
       secondLook: sighting.secondLook,
+      partial: sighting.partial,
     };
   });
 

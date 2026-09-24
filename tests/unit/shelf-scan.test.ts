@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { matchSpine } from "@/server/shelf-scan/match";
 import { findOwned } from "@/server/shelf-scan/owned";
-import { mergeLooks, scanShelf } from "@/server/shelf-scan";
+import { mergeLooks, scanShelf, tidyShelf } from "@/server/shelf-scan";
+import { fragmentFits, leadAuthor, sameTitle } from "@/server/shelf-scan/titles";
 import { configuredModel, readShelf, readSpines, ShelfScanUnavailableError } from "@/server/shelf-scan/vision";
 
 type Volume = { title: string; authors: string[]; isbn13: string };
@@ -80,6 +81,52 @@ describe("grading a spine against a catalogue record", () => {
     expect(match.candidates[0].isbn13).toBe("9781627887427");
   });
 
+  describe("when the first search finds nothing", () => {
+    /** Open Library, answering only the searches `knows` accepts; Google isn't configured. */
+    function openLibrary(knows: (query: { title: string | null; author: string | null }) => Volume[]) {
+      const searches: { title: string | null; author: string | null }[] = [];
+      const fetchFn = (async (input: RequestInfo | URL) => {
+        const params = new URL(String(input)).searchParams;
+        const query = { title: params.get("title"), author: params.get("author") };
+        searches.push(query);
+        return Response.json({
+          docs: knows(query).map((volume) => ({ title: volume.title, author_name: volume.authors, isbn: [volume.isbn13] })),
+        });
+      }) as typeof fetch;
+      return { fetchFn, searches };
+    }
+    const frindle = { title: "Frindle", authors: ["Andrew Clements"], isbn13: "9780689818769" };
+
+    it("searches by the first of two names printed on the spine", async () => {
+      // Author and illustrator, as the spine prints them. As one author, nothing has it.
+      const { fetchFn, searches } = openLibrary((query) => (query.author === "Clements" ? [frindle] : []));
+      const match = await matchSpine({ title: "Frindle", author: "Clements/Selznick" }, fetchFn);
+      expect(searches).toEqual([{ title: "Frindle", author: "Clements" }]);
+      expect(match.candidates[0]).toMatchObject({ isbn13: frindle.isbn13, confidence: "exact" });
+    });
+
+    it("tries the title alone, and still grades against the author read", async () => {
+      const { fetchFn, searches } = openLibrary((query) => (query.author ? [] : [frindle]));
+      const match = await matchSpine({ title: "Frindle", author: "Clements" }, fetchFn);
+      expect(searches.map((search) => search.author)).toEqual(["Clements", null]);
+      expect(match.candidates[0]).toMatchObject({ isbn13: frindle.isbn13, confidence: "exact" });
+    });
+
+    it("finds a title with a letter misread among its author's books, as one to check", async () => {
+      const jumbies = { title: "The Rise of the Jumbies", authors: ["Tracey Baptiste"], isbn13: "9781616206154" };
+      const other = { title: "The Jumbies", authors: ["Tracey Baptiste"], isbn13: "9781616205942" };
+      const { fetchFn, searches } = openLibrary((query) => (query.title ? [] : [other, jumbies]));
+      const match = await matchSpine({ title: "RISE of the JUMBLES", author: "Baptiste" }, fetchFn);
+      expect(searches.at(-1)).toEqual({ title: null, author: "Baptiste" });
+      expect(match.candidates).toEqual([expect.objectContaining({ isbn13: jumbies.isbn13, confidence: "weak" })]);
+    });
+
+    it("doesn't take a misread title by someone else", async () => {
+      const { fetchFn } = openLibrary(() => [{ title: "Rise of the Jumbies", authors: ["Someone Else"], isbn13: "9781616206154" }]);
+      expect((await matchSpine({ title: "Rise of the Jumbles", author: "Baptiste" }, fetchFn)).candidates).toEqual([]);
+    });
+  });
+
   it("returns nothing rather than throwing when both catalogues fail", async () => {
     withKey();
     const failing = (async () => {
@@ -88,6 +135,29 @@ describe("grading a spine against a catalogue record", () => {
     await expect(matchSpine({ title: "Holes", author: "Louis Sachar" }, failing)).resolves.toMatchObject({
       candidates: [],
     });
+  });
+});
+
+describe("comparing what a spine says", () => {
+  it("takes the first of several names", () => {
+    expect(leadAuthor("Clements/Selznick")).toBe("Clements");
+    expect(leadAuthor("VERONICA CHAMBERS / SUJEAN RIM")).toBe("VERONICA CHAMBERS");
+    expect(leadAuthor("Balliett & Helquist")).toBe("Balliett");
+    expect(leadAuthor("Laurie Halse Anderson")).toBe("Laurie Halse Anderson");
+    expect(leadAuthor(null)).toBeNull();
+  });
+
+  it("forgives a stray letter in a long word, and nothing more", () => {
+    expect(sameTitle("RISE of the JUMBLES", "Rise of the Jumbies")).toBe(true);
+    expect(sameTitle("The One and Only Ivan", "The One and Only Bob")).toBe(false);
+    expect(sameTitle("Holes", "Hole")).toBe(false);
+    expect(sameTitle("Cat", "Hat")).toBe(false);
+  });
+
+  it("fits a fragment only to a title whose words it starts, in order", () => {
+    expect(fragmentFits("THE WA SAVED", "The War That Saved My Life")).toBe(true);
+    expect(fragmentFits("SAVED WAR", "The War That Saved My Life")).toBe(false);
+    expect(fragmentFits("Level V", "Incident at Hawk's Hill")).toBe(false);
   });
 });
 
@@ -237,7 +307,7 @@ describe("checking a shelf against the teacher's count", () => {
 
   it("keeps the first reading when the second saw no more", () => {
     const first = [read("Hatchet"), read("Holes")];
-    expect(mergeLooks(first, [read("Hatchet")])).toEqual(first.map((s) => ({ ...s, secondLook: false })));
+    expect(mergeLooks(first, [read("Hatchet")])).toEqual(first.map((s) => ({ ...s, secondLook: false, partial: null })));
   });
 
   it("takes the fuller second look, flagging only the titles the first never saw", () => {
@@ -257,6 +327,108 @@ describe("checking a shelf against the teacher's count", () => {
     const first = [read("Alchemist"), unread(), unread(), read("Deathly Hallows"), read("Boxcar")];
     const second = [read("Alchemist"), read("Frog and Toad"), unread(), unread(), read("Boxcar"), unread()];
     expect(titles(mergeLooks(first, second))).toEqual(["Alchemist", "Frog and Toad", "?", "?", "Deathly Hallows", "Boxcar", "?"]);
+  });
+
+  it("recognises a book both readings saw, however differently they spelled it", () => {
+    // From a real 48-book shelf: the second look fixed "Jumbles" and filled in authors, and
+    // putting the first reading's versions back as well turned 48 books into 51.
+    const first = [
+      { reading: { title: "The One and Only Bob", author: null }, fragment: null, copies: 1 },
+      { reading: { title: "Crossing the Pressure Line", author: "Laura Bird" }, fragment: null, copies: 1 },
+      { reading: { title: "RISE of the JUMBLES", author: "Baptiste" }, fragment: null, copies: 1 },
+    ];
+    const second = [
+      { reading: { title: "THE ONE AND ONLY BOB", author: "Applegate" }, fragment: null, copies: 1 },
+      { reading: { title: "Crossing the Pressure Line", author: "Laura Anne Bird" }, fragment: null, copies: 1 },
+      read("Frindle"),
+      { reading: { title: "Rise of the Jumbies", author: "Baptiste" }, fragment: null, copies: 1 },
+    ];
+    const merged = mergeLooks(first, second);
+    expect(merged.map(({ reading, secondLook }) => [reading?.title, secondLook])).toEqual([
+      ["THE ONE AND ONLY BOB", false],
+      ["Crossing the Pressure Line", false],
+      ["Frindle", true],
+      ["Rise of the Jumbies", false],
+    ]);
+  });
+
+  describe("tidying a reading", () => {
+    const looked = (reading: { title: string; author: string | null } | null, fragment: string | null = null, copies = 1) => ({
+      reading,
+      fragment,
+      copies,
+      secondLook: false,
+      partial: null,
+    });
+
+    it("folds copies standing side by side into one row, whatever author each printed", () => {
+      const tidy = tidyShelf([
+        looked({ title: "Tears of a Tiger", author: "Sharon M. Draper" }),
+        looked({ title: "Tears of a Tiger", author: "DRAPER" }),
+        looked({ title: "Dillon Dillon", author: "Banks" }),
+      ]);
+      expect(tidy.map(({ reading, copies }) => [reading?.title, reading?.author, copies])).toEqual([
+        ["Tears of a Tiger", "Sharon M. Draper", 2],
+        ["Dillon Dillon", "Banks", 1],
+      ]);
+    });
+
+    it("keeps apart same-named books whose authors disagree, and copies that aren't side by side", () => {
+      const tidy = tidyShelf([
+        looked({ title: "Home", author: "Toni Morrison" }),
+        looked({ title: "Home", author: "Marilynne Robinson" }),
+        looked({ title: "Holes", author: null }),
+        looked({ title: "Home", author: "Marilynne Robinson" }),
+      ]);
+      expect(tidy.map(({ copies }) => copies)).toEqual([1, 1, 1, 1]);
+    });
+
+    it("offers a partly read spine as the book beside it when its letters fit, and nothing else", () => {
+      const tidy = tidyShelf([
+        looked(null, "THE WA SAVED"),
+        looked({ title: "The War That Saved My Life", author: "Kimberly Brubaker Bradley" }),
+        looked({ title: "Incident at Hawk's Hill", author: "Eckert" }),
+        // A reading-level sticker on a leaning cover fits nothing.
+        looked(null, "Level V"),
+        looked(null, "THE WAR"),
+        looked(null, null),
+      ]);
+      expect(tidy.map(({ reading, partial, fragment }) => [reading?.title ?? "?", partial, fragment])).toEqual([
+        ["The War That Saved My Life", "THE WA SAVED", "THE WA SAVED"],
+        ["The War That Saved My Life", null, null],
+        ["Incident at Hawk's Hill", null, null],
+        ["?", null, "Level V"],
+        // One legible word is too little to go on, even beside a match.
+        ["?", null, "THE WAR"],
+        ["?", null, null],
+      ]);
+    });
+  });
+
+  it("keeps a partly read copy as a gap unless the book beside it was found", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    const image = { data: new ArrayBuffer(8), mimeType: "image/jpeg" };
+    const answer = [{ title: null, fragment: "THE WA SAVED" }, { title: "The War That Saved My Life", author: "Bradley" }];
+    const shelf = (catalogueKnows: boolean) =>
+      (async (input: RequestInfo | URL) => {
+        if (String(input).includes("generativelanguage")) {
+          return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify(answer) }] } }] });
+        }
+        const docs = catalogueKnows
+          ? [{ title: "The War That Saved My Life", author_name: ["Kimberly Brubaker Bradley"], isbn: ["9780147510488"] }]
+          : [];
+        return Response.json({ docs });
+      }) as typeof fetch;
+
+    const found = await scanShelf(image, { fetchFn: shelf(true) });
+    expect(found.slots.map((slot) => [slot.proposal?.candidates[0].isbn13 ?? null, slot.partial, slot.fragment])).toEqual([
+      ["9780147510488", "THE WA SAVED", "THE WA SAVED"],
+      ["9780147510488", null, null],
+    ]);
+
+    const unknown = await scanShelf(image, { fetchFn: shelf(false) });
+    expect(unknown.slots[0]).toMatchObject({ reading: null, proposal: null, partial: null, fragment: "THE WA SAVED" });
+    expect(unknown.needsAttention).toBe(2);
   });
 
   describe("the second look", () => {

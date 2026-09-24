@@ -13,7 +13,7 @@ import { authorizePhone, problem } from "../pairing-request";
 
 export const runtime = "nodejs";
 // Reading a shelf and matching every spine against two catalogues takes about 20 seconds.
-export const maxDuration = 120;
+export const maxDuration = 180;
 
 /**
  * A shelf photo from the phone. It proposes and never writes: the proposals go to the

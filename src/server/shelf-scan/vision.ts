@@ -51,10 +51,11 @@ const DEFAULT_MODEL = "gemini-flash-latest";
  * The longest one reading may take. Measured on a real 42-book shelf, the default model took
  * 15 to 45 seconds and occasionally more with its full thinking, and was right on nearly
  * every spine; told to think less it took 5 seconds but left a quarter of the shelf unread
- * or muddled. A slow right answer beats a quick half one, so the time is given rather than
- * the thinking taken away. The request is allowed 120 seconds to fit this and the matching.
+ * or muddled. On a 48-book shelf it took 10 to 70 seconds, and twice in fifteen went past
+ * 75. A slow right answer beats a quick half one, so the time is given rather than the
+ * thinking taken away. The request is allowed 180 seconds to fit this and the matching.
  */
-const TIMEOUT_MS = 75_000;
+const TIMEOUT_MS = 110_000;
 /** Below this, there's no point starting a reading: it couldn't finish in time. */
 const MIN_READING_MS = 5_000;
 /** Statuses that mean "not now" rather than "not this": worth one quick retry. */
@@ -81,6 +82,9 @@ const PROMPT = [
   "- Do not infer a book from context, from the books beside it, or from a series it might belong to.",
   "- Do not invent subtitles or series names that are not printed on the spine.",
   "- List only spines actually present in the photo. Do not pad the list out to a round number.",
+  "- A book leaning at an angle or turned to show its cover is still one book: list it once, by its",
+  "  spine if you can see it. Its front or back cover, and the gap it leaves beside it, are not more",
+  "  spines. Nor are bookends, shelf edges, empty space, or a sticker or label on its own.",
   '- Return an empty "spines" list if the photo has no books in it.',
 ].join("\n");
 
