@@ -27,9 +27,10 @@ import { assertOwner } from "@/server/coteaching";
 import { requireClassroom } from "@/server/session";
 import {
   checkPhoto,
+  parseShelfCount,
   scanShelf,
+  type ShelfScan,
   shelfScanConfigured,
-  type ShelfSlot,
   ShelfScanUnavailableError,
 } from "@/server/shelf-scan";
 
@@ -251,7 +252,7 @@ export async function deleteCopyAction(bookId: string, copyId: string): Promise<
 }
 
 export type ShelfScanActionResult =
-  | { status: "scanned"; slots: ShelfSlot[]; needsAttention: number }
+  | ({ status: "scanned" } & ShelfScan)
   | { status: "unconfigured" }
   | { status: "invalid"; message: string }
   | { status: "unavailable"; message: string };
@@ -273,8 +274,11 @@ export async function scanShelfAction(formData: FormData): Promise<ShelfScanActi
     // The teacher's own catalogue goes in, so a second printing of a book they already
     // have offers another copy instead of quietly creating a duplicate title.
     const owned = await listBookIdentities(getDb(), teacherId);
-    const scan = await scanShelf({ data: await photo.data.arrayBuffer(), mimeType: photo.mimeType }, { owned });
-    return { status: "scanned", slots: scan.slots, needsAttention: scan.needsAttention };
+    // The teacher's count of books on the shelf, if they gave one: it checks the photo, and
+    // earns a second look when the photo comes up short.
+    const expected = parseShelfCount(formData.get("expected"));
+    const scan = await scanShelf({ data: await photo.data.arrayBuffer(), mimeType: photo.mimeType }, { owned, expected });
+    return { status: "scanned", ...scan };
   } catch (error) {
     if (error instanceof ShelfScanUnavailableError) {
       console.warn(`Shelf scan unavailable: ${error.message}`);

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { matchSpine } from "@/server/shelf-scan/match";
 import { findOwned } from "@/server/shelf-scan/owned";
+import { mergeLooks, scanShelf } from "@/server/shelf-scan";
 import { readSpines } from "@/server/shelf-scan/vision";
 
 type Volume = { title: string; authors: string[]; isbn13: string };
@@ -100,7 +101,7 @@ describe("reading spines from a photo", () => {
 
   const image = { data: new ArrayBuffer(8), mimeType: "image/jpeg" };
 
-  it("keeps one row per book when two copies stand side by side", async () => {
+  it("keeps one row per book when two copies stand side by side, remembering there were two", async () => {
     vi.stubEnv("GEMINI_API_KEY", "test-key");
     const sightings = await readSpines(
       image,
@@ -111,15 +112,15 @@ describe("reading spines from a photo", () => {
       ]),
     );
     expect(sightings).toEqual([
-      { reading: { title: "Wonder", author: "R. J. Palacio" }, fragment: null },
-      { reading: { title: "Holes", author: "Louis Sachar" }, fragment: null },
+      { reading: { title: "Wonder", author: "R. J. Palacio" }, fragment: null, copies: 2 },
+      { reading: { title: "Holes", author: "Louis Sachar" }, fragment: null, copies: 1 },
     ]);
   });
 
   it("keeps a missing author as null", async () => {
     vi.stubEnv("GEMINI_API_KEY", "test-key");
     const sightings = await readSpines(image, geminiReturning([{ title: "Orthodoxy" }]));
-    expect(sightings).toEqual([{ reading: { title: "Orthodoxy", author: null }, fragment: null }]);
+    expect(sightings).toEqual([{ reading: { title: "Orthodoxy", author: null }, fragment: null, copies: 1 }]);
   });
 
   it("keeps a spine it could see but not read, in its place on the shelf", async () => {
@@ -133,9 +134,9 @@ describe("reading spines from a photo", () => {
       ]),
     );
     expect(sightings).toEqual([
-      { reading: { title: "Hatchet", author: "Gary Paulsen" }, fragment: null },
-      { reading: null, fragment: "The Mouse and the" },
-      { reading: { title: "Holes", author: "Louis Sachar" }, fragment: null },
+      { reading: { title: "Hatchet", author: "Gary Paulsen" }, fragment: null, copies: 1 },
+      { reading: null, fragment: "The Mouse and the", copies: 1 },
+      { reading: { title: "Holes", author: "Louis Sachar" }, fragment: null, copies: 1 },
     ]);
   });
 
@@ -143,9 +144,9 @@ describe("reading spines from a photo", () => {
     vi.stubEnv("GEMINI_API_KEY", "test-key");
     const sightings = await readSpines(image, geminiReturning([{ title: null }, { title: "   " }, {}]));
     expect(sightings).toEqual([
-      { reading: null, fragment: null },
-      { reading: null, fragment: null },
-      { reading: null, fragment: null },
+      { reading: null, fragment: null, copies: 1 },
+      { reading: null, fragment: null, copies: 1 },
+      { reading: null, fragment: null, copies: 1 },
     ]);
   });
 
@@ -197,5 +198,93 @@ describe("recognising a book already on the shelves", () => {
   it("does not match a same-named book by a different author", () => {
     const owned = findOwned(match({ title: "Charlotte's Web", author: "Someone Else" }, ["9781111111111"]), shelf);
     expect(owned).toBeNull();
+  });
+});
+
+describe("checking a shelf against the teacher's count", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  const read = (title: string, copies = 1) => ({ reading: { title, author: null }, fragment: null, copies });
+  const unread = (fragment: string | null = null) => ({ reading: null, fragment, copies: 1 });
+  const titles = (sightings: { reading: { title: string } | null }[]) => sightings.map((s) => s.reading?.title ?? "?");
+
+  it("keeps the first reading when the second saw no more", () => {
+    const first = [read("Hatchet"), read("Holes")];
+    expect(mergeLooks(first, [read("Hatchet")])).toEqual(first.map((s) => ({ ...s, secondLook: false })));
+  });
+
+  it("takes the fuller second look, flagging only the titles the first never saw", () => {
+    const merged = mergeLooks([read("Hatchet"), unread(), read("Holes")], [read("Hatchet", 2), read("Wonder"), unread(), unread("The Mou"), read("Holes")]);
+    expect(merged.map(({ reading, copies, secondLook }) => [reading?.title ?? "?", copies, secondLook])).toEqual([
+      // A second copy of a book already found is just another copy.
+      ["Hatchet", 2, false],
+      ["Wonder", 1, true],
+      ["?", 1, false],
+      // The first reading saw one unreadable spine; a second is new.
+      ["?", 1, true],
+      ["Holes", 1, false],
+    ]);
+  });
+
+  it("never takes a book off the shelf that the first reading found, and puts it back beside its nearer neighbour", () => {
+    const first = [read("Alchemist"), unread(), unread(), read("Deathly Hallows"), read("Boxcar")];
+    const second = [read("Alchemist"), read("Frog and Toad"), unread(), unread(), read("Boxcar"), unread()];
+    expect(titles(mergeLooks(first, second))).toEqual(["Alchemist", "Frog and Toad", "?", "?", "Deathly Hallows", "Boxcar", "?"]);
+  });
+
+  describe("the second look", () => {
+    const image = { data: new ArrayBuffer(8), mimeType: "image/jpeg" };
+
+    /** Gemini answers each call with the next reading; every catalogue knows nothing. */
+    function readings(...answers: unknown[][]) {
+      const prompts: string[] = [];
+      const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (!String(input).includes("generativelanguage")) return Response.json({ docs: [] });
+        const body = JSON.parse(String(init?.body));
+        prompts.push(body.contents[0].parts[0].text);
+        const answer = answers[prompts.length - 1];
+        if (!answer) return new Response("overloaded", { status: 503 });
+        return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify(answer) }] } }] });
+      }) as typeof fetch;
+      return { fetchFn, prompts };
+    }
+
+    it("isn't taken without a count, or when the count is met", async () => {
+      vi.stubEnv("GEMINI_API_KEY", "test-key");
+      const shelf = [{ title: "Hatchet" }, { title: "Hatchet" }, { title: "Holes" }];
+      for (const expected of [null, 3]) {
+        const { fetchFn, prompts } = readings(shelf);
+        const scan = await scanShelf(image, { fetchFn, expected });
+        expect(prompts).toHaveLength(1);
+        expect(scan.tally).toEqual({ expected, seen: 3, missing: 0, foundOnSecondLook: 0 });
+      }
+    });
+
+    it("is taken when the photo comes up short, knowing the count and the first reading", async () => {
+      vi.stubEnv("GEMINI_API_KEY", "test-key");
+      const { fetchFn, prompts } = readings(
+        [{ title: "Hatchet" }, { title: "Holes" }],
+        [{ title: "Hatchet" }, { title: "Wonder" }, { title: "Holes" }],
+      );
+      const scan = await scanShelf(image, { fetchFn, expected: 5 });
+      expect(prompts).toHaveLength(2);
+      expect(prompts[1]).toContain("counted 5 books on this shelf. A first reading found 2:");
+      expect(prompts[1]).toContain("1. Hatchet");
+      expect(prompts[1]).toContain("Do not add a spine");
+      expect(scan.tally).toEqual({ expected: 5, seen: 3, missing: 2, foundOnSecondLook: 1 });
+      expect(scan.slots.map((slot) => [slot.reading?.title, slot.secondLook])).toEqual([
+        ["Hatchet", false],
+        ["Wonder", true],
+        ["Holes", false],
+      ]);
+    });
+
+    it("keeps the first reading if the second look fails", async () => {
+      vi.stubEnv("GEMINI_API_KEY", "test-key");
+      const { fetchFn } = readings([{ title: "Hatchet" }]);
+      const scan = await scanShelf(image, { fetchFn, expected: 4 });
+      expect(scan.slots).toHaveLength(1);
+      expect(scan.tally).toEqual({ expected: 4, seen: 1, missing: 3, foundOnSecondLook: 0 });
+    });
   });
 });

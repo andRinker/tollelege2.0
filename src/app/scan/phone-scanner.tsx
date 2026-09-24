@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BarcodeCamera } from "@/components/barcode-scanner";
 import { preparePhoto } from "@/components/prepare-photo";
+import { ShelfCountField } from "@/components/shelf-count-field";
 import { normalizeIsbn } from "@/lib/isbn";
 import { cx } from "@/ui/cx";
 import { Button } from "@/ui/components/button";
@@ -70,6 +71,7 @@ export function PhoneScanner() {
   const [typed, setTyped] = useState("");
   const [shelfState, setShelfState] = useState<"idle" | "sending" | "sent" | "failed">("idle");
   const [shelfMessage, setShelfMessage] = useState<string | null>(null);
+  const [shelfCount, setShelfCount] = useState("");
   const token = useRef<string | null>(null);
   const nextId = useRef(1);
   const queue = useRef<string[]>([]);
@@ -189,6 +191,7 @@ export function PhoneScanner() {
     try {
       const data = new FormData();
       data.set("photo", await preparePhoto(file));
+      if (shelfCount.trim()) data.set("expected", shelfCount.trim());
       const response = await send("/api/scan/shelf", { method: "POST", body: data });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
@@ -201,11 +204,15 @@ export function PhoneScanner() {
         body.needsAttention > 0
           ? ` ${body.needsAttention} ${body.needsAttention === 1 ? "spine needs" : "spines need"} you.`
           : "";
+      const tally = body.tally as { expected: number | null; seen: number } | undefined;
+      const counted =
+        tally?.expected != null && tally.seen < tally.expected ? ` Saw ${tally.seen} of the ${tally.expected} you counted.` : "";
       setShelfMessage(
         body.found > 0
-          ? `Found ${body.found} ${body.found === 1 ? "book" : "books"}.${needs} Confirm on your computer.`
+          ? `Found ${body.found} ${body.found === 1 ? "book" : "books"}.${counted}${needs} Confirm on your computer.`
           : "No spines could be read. Try a straighter photo of one shelf.",
       );
+      setShelfCount("");
     } catch {
       setShelfState("failed");
       setShelfMessage("Couldn't send that photo. Check your connection and try again.");
@@ -275,7 +282,8 @@ export function PhoneScanner() {
       </form>
 
       {pairing.session.canSendShelfPhotos && (
-        <div className="flex flex-col gap-2 rounded-xl bg-surface-container-low p-4">
+        <div className="flex flex-col gap-2 rounded-xl bg-surface-container-low p-4 [--field-bg:var(--md-sys-color-surface-container-low)]">
+          <ShelfCountField value={shelfCount} onChange={setShelfCount} />
           <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg bg-secondary-container px-5 py-3 text-label-lg text-on-secondary-container">
             <Icon icon={iconPhotoCamera} size={20} />
             {shelfState === "sending" ? "Sending…" : "Photograph a shelf"}

@@ -18,6 +18,12 @@ export type SpineSighting = {
   reading: SpineReading | null;
   /** Whatever *was* legible on an unreadable spine. A partial read, never a guess. */
   fragment: string | null;
+  /**
+   * How many identical spines this one row stands for. Copies of a book are folded into
+   * one row, but they are still books on the shelf: a count the teacher gave is checked
+   * against them, and confirming the row adds that many.
+   */
+  copies: number;
 };
 
 export class ShelfScanUnavailableError extends Error {}
@@ -48,6 +54,37 @@ const PROMPT = [
   "- Return an empty array if the photo has no books in it.",
 ].join("\n");
 
+/**
+ * The second look, when the first came up short of the count a teacher gave. It sees what
+ * the first reading listed, so it can hunt for the spines between them rather than start
+ * again, and it keeps every rule of the first: a count is a reason to look harder, never a
+ * number to reach. A spine invented to make up the total is exactly the failure the rules
+ * exist to prevent, so it is told outright that coming up short is the right answer.
+ */
+function secondLookPrompt(expected: number, previous: SpineSighting[]): string {
+  const listed = previous.map((sighting, index) => {
+    const copies = sighting.copies > 1 ? ` (${sighting.copies} identical spines)` : "";
+    if (sighting.reading) {
+      return `${index + 1}. ${sighting.reading.title}${sighting.reading.author ? ` — ${sighting.reading.author}` : ""}${copies}`;
+    }
+    return `${index + 1}. (could not be read${sighting.fragment ? `; legible: "${sighting.fragment}"` : ""})`;
+  });
+  const seen = previous.reduce((total, sighting) => total + sighting.copies, 0);
+  return [
+    PROMPT,
+    "",
+    `The teacher who took this photo counted ${expected} books on this shelf. A first reading found ${seen}:`,
+    ...listed,
+    "",
+    "Look at the shelf again, carefully, for spines that reading missed: very thin spines, spines at",
+    "either end of the shelf, spines in shadow, books lying flat, and two similar spines side by side",
+    "that may have been read as one. Then list every spine again, from left to right, including the",
+    "ones the first reading found. Every rule above still applies.",
+    `If you still see fewer than ${expected} spines, return only the ones you see. Do not add a spine`,
+    "to reach the teacher's count: a missing book is found in seconds, and an invented one is not.",
+  ].join("\n");
+}
+
 const SCHEMA = {
   type: "ARRAY",
   items: {
@@ -76,10 +113,10 @@ function cleanSighting(value: unknown): SpineSighting | null {
   if (!title) {
     // A spine it could see but not read. Kept rather than dropped, which is the whole point.
     const fragment = text(record.fragment, 200);
-    return { reading: null, fragment: fragment || null };
+    return { reading: null, fragment: fragment || null, copies: 1 };
   }
   const author = text(record.author, 200);
-  return { reading: { title, author: author || null }, fragment: null };
+  return { reading: { title, author: author || null }, fragment: null, copies: 1 };
 }
 
 /**
@@ -90,10 +127,12 @@ function cleanSighting(value: unknown): SpineSighting | null {
 export async function readSpines(
   image: { data: ArrayBuffer; mimeType: string },
   fetchFn: typeof fetch = fetch,
+  /** A second look: the teacher's count, and what the first reading found. */
+  again?: { expected: number; previous: SpineSighting[] },
 ): Promise<SpineSighting[]> {
   if (process.env.SHELF_SCAN_FIXTURES === "1") {
-    const { FIXTURE_SHELF } = await import("./fixtures");
-    return FIXTURE_SHELF;
+    const { FIXTURE_SHELF, FIXTURE_SECOND_LOOK } = await import("./fixtures");
+    return again ? FIXTURE_SECOND_LOOK : FIXTURE_SHELF;
   }
 
   const apiKey = process.env.GEMINI_API_KEY;
@@ -110,7 +149,7 @@ export async function readSpines(
         contents: [
           {
             parts: [
-              { text: PROMPT },
+              { text: again ? secondLookPrompt(again.expected, again.previous) : PROMPT },
               { inline_data: { mime_type: image.mimeType, data: Buffer.from(image.data).toString("base64") } },
             ],
           },
@@ -142,20 +181,29 @@ export async function readSpines(
   if (!Array.isArray(parsed)) return [];
 
   const sightings: SpineSighting[] = [];
-  const seen = new Set<string>();
+  const seen = new Map<string, SpineSighting>();
   for (const entry of parsed) {
     const sighting = cleanSighting(entry);
     if (!sighting) continue;
     if (sighting.reading) {
-      // Two copies side by side read as two identical spines; the teacher only needs one row.
-      // Unread spines are never folded together: they have no title to be the same by, and
-      // each one is a different book somebody has to go and look at.
-      const key = `${sighting.reading.title.toLowerCase()}|${sighting.reading.author?.toLowerCase() ?? ""}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
+      // Two copies side by side read as two identical spines; the teacher only needs one
+      // row, but it remembers there were two. Unread spines are never folded together:
+      // they have no title to be the same by, and each is a different book to go and see.
+      const key = spineKey(sighting.reading);
+      const earlier = seen.get(key);
+      if (earlier) {
+        earlier.copies += 1;
+        continue;
+      }
+      seen.set(key, sighting);
     }
     sightings.push(sighting);
     if (sightings.length >= MAX_READINGS) break;
   }
   return sightings;
+}
+
+/** What makes two readings the same book, for folding copies together. */
+export function spineKey(reading: SpineReading): string {
+  return `${reading.title.toLowerCase()}|${reading.author?.toLowerCase() ?? ""}`;
 }
