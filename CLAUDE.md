@@ -129,6 +129,19 @@ Consequences, all deliberate:
 - A co-teacher is granted only on a **verified** email. An address with no account, or an unverified one, gets an invite in `class_teacher_invites`, claimed in the app layout on the first verified sign-in. Otherwise registering a colleague's address with a password would hand over their class.
 - Checkouts aren't attributed to who made them; the classroom is the owner's.
 
+### Handing over
+
+`src/server/handover.ts` gives classes and books to another teacher: offered from Settings → Hand over, accepted from the recipient's Home page. The recipient needs a verified email, like a co-teacher. An offer (`handovers`) stores the class and book IDs resolved when it was sent, one pending per sender, and nothing moves until it's accepted.
+
+Accepting is **one transaction that rewrites `teacher_id` on every row that moves**, with the ownership keys deferred to commit (`set constraints all deferred`). Migration 0007 made those keys `DEFERRABLE INITIALLY IMMEDIATE`, by hand, because drizzle can't declare it; they're still checked per statement everywhere else, and ON DELETE actions never defer. If the keys are ever regenerated, carry that across with the `SET NULL (column)` clauses.
+
+Consequences, all deliberate:
+
+- Every refusal is checked again on accepting, and a blocked offer stays pending. Refused: a book out with a student when the book and the student would end up in different classrooms; a book lent to, borrowed from, or requested by another teacher; a student ID the recipient already uses.
+- A class takes its students, and a student takes their history. A **past** checkout that spans the split keeps the student and lets go of the book (`copy_id`/`book_id` null, recorded title kept), exactly as deleting the book would.
+- A book the recipient already owns by ISBN joins their title as more copies, renumbered, and the sender's title row is deleted. Finished `shelf_loans` rows for moved books are deleted; nothing reads them.
+- Co-teacher grants and invites move with the class. The previous owner is added as a co-teacher of every class handed over, and the recipient's own grant on it is dropped.
+
 ## Lending library
 
 `src/server/connections.ts` links two teachers; `src/server/lending.ts` moves a book between them. Teachers connect one pair at a time — an invitation by email, accepted by the other — and `teacher_connections` stores the pair normalised (`teacher_a_id < teacher_b_id`) so one pair can only ever have one row. Once connected, each sees the other's titles; `books.lendable` defaults to true and is the per-title exception, for class sets.

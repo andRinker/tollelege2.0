@@ -33,6 +33,9 @@ export type ConnectionStatus = (typeof connectionStatuses)[number];
 export const shelfLoanStatuses = ["requested", "declined", "cancelled", "active", "returned"] as const;
 export type ShelfLoanStatus = (typeof shelfLoanStatuses)[number];
 
+export const handoverStatuses = ["pending", "accepted", "declined", "withdrawn"] as const;
+export type HandoverStatus = (typeof handoverStatuses)[number];
+
 /** What a paired phone sent back for the signed-in browser to pick up. */
 export const scanEventKinds = ["book_added", "lookup_failed", "shelf_proposed"] as const;
 export type ScanEventKind = (typeof scanEventKinds)[number];

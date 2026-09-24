@@ -50,6 +50,13 @@
       "when": 1790207237340,
       "tag": "0006_coteaching",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790208936881,
+      "tag": "0007_handover",
+      "breakpoints": true
     }
   ]
 }
