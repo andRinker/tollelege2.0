@@ -15,7 +15,7 @@ export const metadata: Metadata = { title: "Add books" };
 // then searches two catalogues for every spine — around 20 seconds for a full shelf.
 // Vercel's default is far higher, but naming it here keeps the feature working if that
 // project default is ever lowered, and still caps a runaway scan.
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 export default async function AddBooksPage() {
   const { teacherId, isOwner } = await requireClassroom();

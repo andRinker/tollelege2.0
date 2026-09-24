@@ -10,12 +10,12 @@ export type { SpineReading, SpineSighting } from "./vision";
 export { type ShelfScanFailure, shelfScanConfigured, ShelfScanUnavailableError } from "./vision";
 
 /**
- * A scan runs inside one request, which the host stops at 60 seconds. The readings get
- * the first 40 of them, leaving the rest for matching every spine against the catalogues;
- * a second look only starts if enough is left for it to be worth waiting for.
+ * A scan runs inside one request, which the host stops at 120 seconds. The readings get
+ * the first 95 of them, leaving the rest for matching every spine against the catalogues;
+ * a second look only starts if enough is left for a thorough reading to finish.
  */
-const READING_BUDGET_MS = 40_000;
-const SECOND_LOOK_NEEDS_MS = 15_000;
+const READING_BUDGET_MS = 95_000;
+const SECOND_LOOK_NEEDS_MS = 35_000;
 
 /** What a teacher is told when the reader fails, by why it failed. */
 export function describeShelfFailure(reason: ShelfScanFailure): string {

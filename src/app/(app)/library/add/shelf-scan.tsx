@@ -235,6 +235,8 @@ export function ShelfScanDialog({
           <div className="grid place-items-center gap-3 py-12">
             <LoadingIndicator contained label="Reading the shelf" />
             <p className="text-body-md text-on-surface-variant">Reading the spines…</p>
+            {/* A thorough reading of a full shelf takes a while; say so, so it isn't taken for a hang. */}
+            <p className="text-body-sm text-on-surface-variant">A full shelf can take up to a minute.</p>
           </div>
         )}
 

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { matchSpine } from "@/server/shelf-scan/match";
 import { findOwned } from "@/server/shelf-scan/owned";
 import { mergeLooks, scanShelf } from "@/server/shelf-scan";
-import { readShelf, readSpines, ShelfScanUnavailableError } from "@/server/shelf-scan/vision";
+import { configuredModel, readShelf, readSpines, ShelfScanUnavailableError } from "@/server/shelf-scan/vision";
 
 type Volume = { title: string; authors: string[]; isbn13: string };
 
@@ -401,5 +401,45 @@ describe("when the reader fails", () => {
     expect(cut.message).toContain("MAX_TOKENS");
     const withheld = await failure(responses(answer({ finishReason: "SAFETY" })).fetchFn);
     expect(withheld.message).toContain("SAFETY");
+  });
+});
+
+describe("choosing the model", () => {
+  afterEach(() => vi.unstubAllEnvs());
+  const image = { data: new ArrayBuffer(8), mimeType: "image/jpeg" };
+
+  it("forgives the ways a person might type a model's name", () => {
+    expect(configuredModel(undefined)).toBe("gemini-flash-latest");
+    expect(configuredModel("  ")).toBe("gemini-flash-latest");
+    expect(configuredModel("3.5-flash-lite")).toBe("gemini-3.5-flash-lite");
+    expect(configuredModel("3.5 Flash Lite")).toBe("gemini-3.5-flash-lite");
+    expect(configuredModel("models/gemini-3.8-flash")).toBe("gemini-3.8-flash");
+  });
+
+  it("falls back to the default when Google doesn't know the configured model", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    vi.stubEnv("GEMINI_MODEL", "gemini-9-imaginary");
+    const urls: string[] = [];
+    const fetchFn = (async (input: RequestInfo | URL) => {
+      urls.push(String(input));
+      if (String(input).includes("imaginary")) return new Response('{"error":{"message":"not found"}}', { status: 404 });
+      return Response.json({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: '{"spines":[{"title":"Holes"}]}' }] } }] });
+    }) as typeof fetch;
+    expect((await readShelf(image, fetchFn)).sightings).toHaveLength(1);
+    expect(urls.map((url) => url.match(/models\/([^:]+)/)?.[1])).toEqual(["gemini-9-imaginary", "gemini-flash-latest"]);
+  });
+
+  it("passes a thinking level through only when one is set", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    const bodies: { generationConfig: { thinkingConfig?: unknown } }[] = [];
+    const fetchFn = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return Response.json({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: '{"spines":[]}' }] } }] });
+    }) as typeof fetch;
+    await readShelf(image, fetchFn);
+    vi.stubEnv("GEMINI_THINKING", "Low");
+    await readShelf(image, fetchFn);
+    expect(bodies[0].generationConfig.thinkingConfig).toBeUndefined();
+    expect(bodies[1].generationConfig.thinkingConfig).toEqual({ thinkingLevel: "low" });
   });
 });

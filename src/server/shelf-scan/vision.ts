@@ -47,8 +47,14 @@ const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta";
 // An alias rather than a pinned version, so the model can improve without a code change.
 // Numbered previews come and go, and some of them answer on a different API entirely.
 const DEFAULT_MODEL = "gemini-flash-latest";
-/** The longest one reading may take. A dense shelf is a long answer, and some models think first. */
-const TIMEOUT_MS = 45_000;
+/**
+ * The longest one reading may take. Measured on a real 42-book shelf, the default model took
+ * 15 to 45 seconds and occasionally more with its full thinking, and was right on nearly
+ * every spine; told to think less it took 5 seconds but left a quarter of the shelf unread
+ * or muddled. A slow right answer beats a quick half one, so the time is given rather than
+ * the thinking taken away. The request is allowed 120 seconds to fit this and the matching.
+ */
+const TIMEOUT_MS = 75_000;
 /** Below this, there's no point starting a reading: it couldn't finish in time. */
 const MIN_READING_MS = 5_000;
 /** Statuses that mean "not now" rather than "not this": worth one quick retry. */
@@ -205,7 +211,7 @@ export async function readShelf(
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new ShelfScanUnavailableError("GEMINI_API_KEY is not set.", "unconfigured");
-  const model = process.env.GEMINI_MODEL || DEFAULT_MODEL;
+  let model = configuredModel();
   const pass = again ? "second look" : "first reading";
   const body = JSON.stringify({
     contents: [
@@ -217,7 +223,12 @@ export async function readShelf(
       },
     ],
     // Temperature 0 keeps two photos of the same shelf from disagreeing with each other.
-    generationConfig: { responseMimeType: "application/json", responseSchema: SCHEMA, temperature: 0 },
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseSchema: SCHEMA,
+      temperature: 0,
+      ...thinkingConfig(),
+    },
   });
 
   const started = Date.now();
@@ -243,6 +254,14 @@ export async function readShelf(
       );
     }
     if (response.ok) break;
+
+    // A model name Google doesn't know (a typo, or a model since retired) would fail every
+    // scan until someone noticed. Fall back to the default alias, once, and say so loudly.
+    if (response.status === 404 && model !== DEFAULT_MODEL) {
+      console.error(`Shelf scan: model "${model}" not found; using ${DEFAULT_MODEL}. Check GEMINI_MODEL.`);
+      model = DEFAULT_MODEL;
+      continue;
+    }
 
     // Google explains a refusal in the body ("model is overloaded", "API key not valid",
     // "quota exceeded"). Kept, briefly, for the log: it is the difference between waiting
@@ -322,4 +341,24 @@ export async function readShelf(
 /** What makes two readings the same book, for folding copies together. */
 export function spineKey(reading: SpineReading): string {
   return `${reading.title.toLowerCase()}|${reading.author?.toLowerCase() ?? ""}`;
+}
+
+/**
+ * The model to read with: `GEMINI_MODEL` if set, else the default alias. Forgiving of how a
+ * person types a model name, since a near miss fails every scan: "3.5 Flash Lite",
+ * "models/gemini-3.5-flash-lite" and "gemini-3.5-flash-lite" all mean the same model.
+ */
+export function configuredModel(raw = process.env.GEMINI_MODEL): string {
+  const name = (raw ?? "").trim().toLowerCase().replace(/^models\//, "").replace(/\s+/g, "-");
+  if (!name) return DEFAULT_MODEL;
+  return /^\d/.test(name) ? `gemini-${name}` : name;
+}
+
+/**
+ * `GEMINI_THINKING` (minimal, low, medium or high) overrides how much the model thinks
+ * before answering. Unset leaves the model's own default, which measured best on accuracy.
+ */
+function thinkingConfig(): { thinkingConfig?: { thinkingLevel: string } } {
+  const level = process.env.GEMINI_THINKING?.trim().toLowerCase();
+  return level && ["minimal", "low", "medium", "high"].includes(level) ? { thinkingConfig: { thinkingLevel: level } } : {};
 }

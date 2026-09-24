@@ -8,7 +8,7 @@ export const metadata: Metadata = {
 };
 
 // Reading a shelf photo takes about 20 seconds, same as anywhere else it happens.
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 /**
  * The scanner a phone opens after reading the QR code on a teacher's computer.
