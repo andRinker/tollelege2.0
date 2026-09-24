@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { BarcodeCamera } from "@/components/barcode-scanner";
 import { preparePhoto } from "@/components/prepare-photo";
 import { ShelfCountField } from "@/components/shelf-count-field";
+import { ShelfCropper } from "@/components/shelf-cropper";
+import type { CropBox } from "@/lib/crop";
 import { normalizeIsbn } from "@/lib/isbn";
 import { cx } from "@/ui/cx";
 import { Button } from "@/ui/components/button";
@@ -72,6 +74,8 @@ export function PhoneScanner() {
   const [shelfState, setShelfState] = useState<"idle" | "sending" | "sent" | "failed">("idle");
   const [shelfMessage, setShelfMessage] = useState<string | null>(null);
   const [shelfCount, setShelfCount] = useState("");
+  /** A shelf photo taken and waiting to be cropped before it's sent. */
+  const [shelfFile, setShelfFile] = useState<File | null>(null);
   const token = useRef<string | null>(null);
   const nextId = useRef(1);
   const queue = useRef<string[]>([]);
@@ -185,12 +189,12 @@ export function PhoneScanner() {
     return () => clearInterval(timer);
   }, [pairing.kind, submit]);
 
-  async function sendShelf(file: File) {
+  async function sendShelf(file: File, crop: CropBox | null) {
     setShelfState("sending");
     setShelfMessage(null);
     try {
       const data = new FormData();
-      data.set("photo", await preparePhoto(file));
+      data.set("photo", await preparePhoto(file, crop));
       if (shelfCount.trim()) data.set("expected", shelfCount.trim());
       const response = await send("/api/scan/shelf", { method: "POST", body: data });
       const body = await response.json().catch(() => ({}));
@@ -207,15 +211,19 @@ export function PhoneScanner() {
       const tally = body.tally as { expected: number | null; seen: number } | undefined;
       const counted =
         tally?.expected != null && tally.seen < tally.expected ? ` Saw ${tally.seen} of the ${tally.expected} you counted.` : "";
+      const other =
+        body.otherShelf > 0 ? ` Left out ${body.otherShelf} from another shelf in the photo.` : "";
       setShelfMessage(
         body.found > 0
-          ? `Found ${body.found} ${body.found === 1 ? "book" : "books"}.${counted}${needs} Confirm on your computer.`
+          ? `Found ${body.found} ${body.found === 1 ? "book" : "books"}.${counted}${needs}${other} Confirm on your computer.`
           : "No spines could be read. Try a straighter photo of one shelf.",
       );
       setShelfCount("");
     } catch {
       setShelfState("failed");
       setShelfMessage("Couldn't send that photo. Check your connection and try again.");
+    } finally {
+      setShelfFile(null);
     }
   }
 
@@ -283,10 +291,18 @@ export function PhoneScanner() {
 
       {pairing.session.canSendShelfPhotos && (
         <div className="flex flex-col gap-2 rounded-xl bg-surface-container-low p-4 [--field-bg:var(--md-sys-color-surface-container-low)]">
-          <ShelfCountField value={shelfCount} onChange={setShelfCount} />
+          {shelfFile ? (
+            <ShelfCropper
+              file={shelfFile}
+              onUse={(crop) => void sendShelf(shelfFile, crop)}
+              busyLabel={shelfState === "sending" ? "Sending…" : undefined}
+            />
+          ) : (
+            <ShelfCountField value={shelfCount} onChange={setShelfCount} />
+          )}
           <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg bg-secondary-container px-5 py-3 text-label-lg text-on-secondary-container">
             <Icon icon={iconPhotoCamera} size={20} />
-            {shelfState === "sending" ? "Sending…" : "Photograph a shelf"}
+            {shelfState === "sending" ? "Sending…" : shelfFile ? "Take it again" : "Photograph a shelf"}
             <input
               type="file"
               accept="image/*"
@@ -296,7 +312,7 @@ export function PhoneScanner() {
               onChange={(event) => {
                 const file = event.target.files?.[0];
                 event.target.value = "";
-                if (file) void sendShelf(file);
+                if (file) setShelfFile(file);
               }}
             />
           </label>

@@ -27,6 +27,7 @@ import { assertOwner } from "@/server/coteaching";
 import { requireClassroom } from "@/server/session";
 import {
   checkPhoto,
+  describeShelfFailure,
   parseShelfCount,
   scanShelf,
   type ShelfScan,
@@ -281,8 +282,8 @@ export async function scanShelfAction(formData: FormData): Promise<ShelfScanActi
     return { status: "scanned", ...scan };
   } catch (error) {
     if (error instanceof ShelfScanUnavailableError) {
-      console.warn(`Shelf scan unavailable: ${error.message}`);
-      return { status: "unavailable", message: "Couldn't read the photo just now. Try again in a moment." };
+      console.warn(`Shelf scan unavailable (${error.reason}): ${error.message}`);
+      return { status: "unavailable", message: describeShelfFailure(error.reason) };
     }
     return { status: "unavailable", message: handleError(error).message };
   }

@@ -8,7 +8,7 @@ export type ScanFeedEvent =
   | { seq: number; kind: "book_added"; payload: Extract<QuickAddOutcome, { status: "added" }> }
   | { seq: number; kind: "lookup_failed"; payload: Exclude<QuickAddOutcome, { status: "added" }> }
   // `tally` is missing from shelves sent before phones could pass a count.
-  | { seq: number; kind: "shelf_proposed"; payload: { slots: ShelfSlot[]; needsAttention: number; tally?: ShelfTally } };
+  | { seq: number; kind: "shelf_proposed"; payload: { slots: ShelfSlot[]; needsAttention: number; tally?: ShelfTally; otherShelf?: number } };
 
 /** Slow enough to be cheap, fast enough that a scan feels like it landed instantly. */
 const INTERVAL_MS = 2000;

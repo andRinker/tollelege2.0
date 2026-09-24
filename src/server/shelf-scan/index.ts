@@ -2,12 +2,36 @@ import "server-only";
 import { type MatchCandidate, type SpineMatch, matchSpine } from "./match";
 import { findOwned, type OwnedBook, type OwnedCandidate } from "./owned";
 import { mergeLooks, spinesSeen } from "./second-look";
-import { readSpines, type SpineReading, ShelfScanUnavailableError } from "./vision";
+import { readShelf, type ShelfScanFailure, type SpineReading, ShelfScanUnavailableError } from "./vision";
 
 export type { MatchCandidate, MatchConfidence, SpineMatch } from "./match";
 export type { OwnedBook, OwnedCandidate } from "./owned";
 export type { SpineReading, SpineSighting } from "./vision";
-export { shelfScanConfigured, ShelfScanUnavailableError } from "./vision";
+export { type ShelfScanFailure, shelfScanConfigured, ShelfScanUnavailableError } from "./vision";
+
+/**
+ * A scan runs inside one request, which the host stops at 60 seconds. The readings get
+ * the first 40 of them, leaving the rest for matching every spine against the catalogues;
+ * a second look only starts if enough is left for it to be worth waiting for.
+ */
+const READING_BUDGET_MS = 40_000;
+const SECOND_LOOK_NEEDS_MS = 15_000;
+
+/** What a teacher is told when the reader fails, by why it failed. */
+export function describeShelfFailure(reason: ShelfScanFailure): string {
+  switch (reason) {
+    case "timeout":
+      return "Reading that shelf took too long. Crop the photo to one shelf, or photograph fewer books at a time.";
+    case "busy":
+      return "The book reader is busy right now. Try again in a minute.";
+    case "refused":
+      return "The book reader turned the photo down. Try again; if it keeps happening, tell your administrator.";
+    case "unreadable":
+      return "The book reader's answer came back garbled. Try the photo again.";
+    case "unconfigured":
+      return "Shelf photos aren't set up on this site yet.";
+  }
+}
 export { mergeLooks } from "./second-look";
 
 /** Catalogue searches run in parallel, but not sixty at once. */
@@ -74,6 +98,11 @@ export type ShelfScan = {
   /** Slots with no book on them, which is the count worth telling a teacher. */
   needsAttention: number;
   tally: ShelfTally;
+  /**
+   * Spines the reader saw on other shelves in the frame and left out. Said out loud, so a
+   * photo where it picked the wrong shelf is caught at once rather than trusted.
+   */
+  otherShelf: number;
 };
 
 /** A count a teacher could plausibly mean for one shelf, or null. */
@@ -112,15 +141,19 @@ export async function scanShelf(
     (process.env.SHELF_SCAN_FIXTURES === "1" ? (await import("./fixtures")).createShelfFixtureFetch() : fetch);
 
   const expected = options.expected ?? null;
-  const first = await readSpines(image, fetchFn);
+  const deadline = Date.now() + READING_BUDGET_MS;
+  const { sightings: first, otherShelf: firstOther } = await readShelf(image, fetchFn, { expected, deadline });
   let sightings = mergeLooks(first, []);
+  let otherShelf = firstOther;
 
   // Short of the teacher's count: one more look, with the first reading to go on. It is
   // best-effort, so a failure keeps the first reading rather than losing the whole scan.
   // An empty first reading is a photo with no shelf in it, and a count is no help there.
-  if (expected !== null && first.length > 0 && spinesSeen(first) < expected) {
+  if (expected !== null && first.length > 0 && spinesSeen(first) < expected && deadline - Date.now() >= SECOND_LOOK_NEEDS_MS) {
     try {
-      sightings = mergeLooks(first, await readSpines(image, fetchFn, { expected, previous: first }));
+      const again = await readShelf(image, fetchFn, { again: { expected, previous: first }, deadline });
+      sightings = mergeLooks(first, again.sightings);
+      otherShelf = Math.max(otherShelf, again.otherShelf);
     } catch (error) {
       if (!(error instanceof ShelfScanUnavailableError)) throw error;
       console.warn(`Shelf scan second look unavailable: ${error.message}`);
@@ -134,7 +167,7 @@ export async function scanShelf(
     missing: expected !== null ? Math.max(0, expected - seen) : 0,
     foundOnSecondLook: seen - spinesSeen(first),
   };
-  if (sightings.length === 0) return { slots: [], needsAttention: 0, tally };
+  if (sightings.length === 0) return { slots: [], needsAttention: 0, tally, otherShelf };
 
   // Only the spines that were actually read cost a catalogue search; the rest already
   // know they need a human, and their place in the row is the useful thing about them.
@@ -156,7 +189,7 @@ export async function scanShelf(
     };
   });
 
-  return { slots, needsAttention: slots.filter((slot) => slot.proposal === null).length, tally };
+  return { slots, needsAttention: slots.filter((slot) => slot.proposal === null).length, tally, otherShelf };
 }
 
 /** The suggestion a teacher sees first, or null when nothing matched that spine. */

@@ -36,6 +36,8 @@ async function photographShelf(page: Page) {
     .locator('input[type="file"]')
     .last()
     .setInputFiles({ name: "shelf.jpg", mimeType: "image/jpeg", buffer: TINY_JPEG });
+  // The crop step comes next; these tests are about the review, so send the photo whole.
+  await page.getByRole("dialog").getByRole("button", { name: "Use the whole photo" }).click();
 }
 
 /**
@@ -181,6 +183,7 @@ test("a count the photo falls short of earns a second look, and says what's stil
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("textbox", { name: /How many books on this shelf/ }).fill("10");
   await dialog.locator('input[type="file"]').last().setInputFiles({ name: "shelf.jpg", mimeType: "image/jpeg", buffer: TINY_JPEG });
+  await dialog.getByRole("button", { name: "Use the whole photo" }).click();
 
   await test.step("it measures the photo against the count", async () => {
     await expect(dialog.getByText(/^Found 9 of the 10 books you counted\. A second look found 3 of them\./)).toBeVisible({
@@ -212,5 +215,36 @@ test("a count the photo falls short of earns a second look, and says what's stil
     // Two Alchemists and one Hallows; Frog and Toad waits unticked.
     await dialog.getByRole("button", { name: "Add 3" }).click();
     await expect(snackbar(page, "Added 2 books and 1 copy from the shelf.")).toBeVisible({ timeout: 30_000 });
+  });
+});
+
+test("a photo can be cropped to one shelf, and says what it left out of others", async ({ page }) => {
+  await signUp(page, "Ines Duarte");
+  await page.goto("/library/add");
+  await page.getByRole("button", { name: "Photograph a shelf" }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.locator('input[type="file"]').last().setInputFiles({ name: "shelf.jpg", mimeType: "image/jpeg", buffer: TINY_JPEG });
+
+  await test.step("each edge of the crop is a slider, so it can be set without a mouse", async () => {
+    const top = dialog.getByRole("slider", { name: "Top edge of the shelf" });
+    const bottom = dialog.getByRole("slider", { name: "Bottom edge of the shelf" });
+    await expect(top).toHaveAttribute("aria-valuenow", "0");
+    await top.focus();
+    await page.keyboard.press("PageDown");
+    await page.keyboard.press("PageDown");
+    await expect(top).toHaveAttribute("aria-valuenow", "20");
+    await bottom.focus();
+    await page.keyboard.press("PageUp");
+    await expect(bottom).toHaveAttribute("aria-valuenow", "90");
+  });
+
+  await test.step("the cropped shelf is read", async () => {
+    await dialog.getByRole("button", { name: "Read this shelf" }).click();
+    await expect(summary(page)).toHaveText("Found 2 books. 4 spines need you.", { timeout: 40_000 });
+  });
+
+  await test.step("and it says how many spines it left out from another shelf", async () => {
+    // The canned photo also caught three spines of the shelf above.
+    await expect(dialog.getByText(/^Left out 3 spines from another shelf in the photo\./)).toBeVisible();
   });
 });

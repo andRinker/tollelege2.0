@@ -17,6 +17,9 @@ export const FIXTURE_SHELF: SpineSighting[] = [
   { reading: null, fragment: null, copies: 1 },
 ];
 
+/** The canned photo also caught the bottom of the shelf above, which the reader left out. */
+export const FIXTURE_OTHER_SHELF = 3;
+
 /**
  * The same shelf on a second look, for when a teacher's count says the first came up
  * short. It finds a second copy of The Alchemist, a thin book the first missed (Frog and
