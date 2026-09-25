@@ -57,44 +57,48 @@ export function PhonePairing({ paired, connected }: { paired: PairedPhone[]; con
       </div>
 
       {started ? (
-        <div className="flex flex-col items-start gap-4 medium:flex-row medium:items-center">
-          <div className="rounded-xl bg-white p-3 shadow-1">
-            <QrCode value={started.url} label="Pairing code for your phone" size={200} />
-          </div>
-          <div className="flex min-w-0 flex-col gap-2">
-            <p
-              className={cx(
-                "flex items-center gap-2 text-title-sm",
-                connected ? "text-primary" : "text-on-surface-variant",
-              )}
-            >
-              {connected ? (
-                <>
-                  <Icon icon={iconCheckCircle} size={20} filled />
-                  {active?.deviceLabel ?? "Your phone"} is scanning
-                </>
-              ) : (
-                <>
-                  <span className="size-2 animate-pulse rounded-full bg-on-surface-variant" />
-                  Waiting for your phone&hellip;
-                </>
-              )}
-            </p>
-            <p className="max-w-prose text-body-sm text-on-surface-variant">
-              {started.expiresLabel} The first phone to open it keeps it, so if the code has been on
-              screen a while, make a new one.
-            </p>
-            <div className="flex flex-wrap gap-2 pt-1">
-              <Button variant="text" size="sm" onPress={start} isPending={pending}>
-                New code
-              </Button>
-              <Button
-                variant="text"
-                size="sm"
-                onPress={() => setDisconnecting(active ?? { ...started, deviceLabel: null })}
+        // Side by side only when this box, not the window, has room: on a mid-sized screen the
+        // page splits into columns and the box is narrower than on a phone.
+        <div className="@container">
+          <div className="flex flex-col items-start gap-4 @md:flex-row @md:items-center">
+            <div className="w-full max-w-56 shrink-0 rounded-xl bg-white p-3 shadow-1">
+              <QrCode value={started.url} label="Pairing code for your phone" size={200} className="block h-auto w-full" />
+            </div>
+            <div className="flex min-w-0 flex-col gap-2">
+              <p
+                className={cx(
+                  "flex items-center gap-2 text-title-sm",
+                  connected ? "text-primary" : "text-on-surface-variant",
+                )}
               >
-                Disconnect
-              </Button>
+                {connected ? (
+                  <>
+                    <Icon icon={iconCheckCircle} size={20} filled />
+                    {active?.deviceLabel ?? "Your phone"} is scanning
+                  </>
+                ) : (
+                  <>
+                    <span className="size-2 animate-pulse rounded-full bg-on-surface-variant" />
+                    Waiting for your phone&hellip;
+                  </>
+                )}
+              </p>
+              <p className="max-w-prose text-body-sm text-on-surface-variant">
+                {started.expiresLabel} The first phone to open it keeps it, so if the code has been on
+                screen a while, make a new one.
+              </p>
+              <div className="flex flex-wrap gap-2 pt-1">
+                <Button variant="text" size="sm" onPress={start} isPending={pending}>
+                  New code
+                </Button>
+                <Button
+                  variant="text"
+                  size="sm"
+                  onPress={() => setDisconnecting(active ?? { ...started, deviceLabel: null })}
+                >
+                  Disconnect
+                </Button>
+              </div>
             </div>
           </div>
         </div>
