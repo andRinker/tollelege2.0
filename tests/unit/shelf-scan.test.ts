@@ -524,6 +524,38 @@ describe("checking a shelf against the teacher's count", () => {
       ]);
     });
 
+    it("reads quickly when the careful reading runs out of time, and says so", async () => {
+      vi.stubEnv("GEMINI_API_KEY", "test-key");
+      vi.useFakeTimers({ toFake: ["Date"] });
+      const thinking: (string | undefined)[] = [];
+      const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (!String(input).includes("generativelanguage")) return Response.json({ docs: [] });
+        const body = JSON.parse(String(init?.body));
+        thinking.push(body.generationConfig.thinkingConfig?.thinkingLevel);
+        if (thinking.length === 1) {
+          // The careful reading takes longer than it is allowed.
+          vi.advanceTimersByTime(81_000);
+          const error = new Error("The operation was aborted due to timeout");
+          error.name = "TimeoutError";
+          throw error;
+        }
+        return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify([{ title: "Hatchet" }]) }] } }] });
+      }) as typeof fetch;
+
+      const scan = await scanShelf(image, { fetchFn, expected: 5 });
+      vi.useRealTimers();
+      // Careful first, then quick; and no careful second look after it, though short of the count.
+      expect(thinking).toEqual([undefined, "low"]);
+      expect(scan.quick).toBe(true);
+      expect(scan.slots.map((slot) => slot.reading?.title)).toEqual(["Hatchet"]);
+    });
+
+    it("doesn't read quickly for anything but running out of time", async () => {
+      vi.stubEnv("GEMINI_API_KEY", "test-key");
+      const fetchFn = (async () => new Response("API key not valid", { status: 400 })) as typeof fetch;
+      await expect(scanShelf(image, { fetchFn })).rejects.toMatchObject({ reason: "refused" });
+    });
+
     it("keeps the first reading if the second look fails", async () => {
       vi.stubEnv("GEMINI_API_KEY", "test-key");
       const { fetchFn } = readings([{ title: "Hatchet" }]);

@@ -16,6 +16,13 @@ export { type ShelfScanFailure, shelfScanConfigured, ShelfScanUnavailableError }
  */
 const READING_BUDGET_MS = 130_000;
 const SECOND_LOOK_NEEDS_MS = 45_000;
+/**
+ * How long the careful first reading gets before it is given up for a quick one. Most
+ * readings take 10 to 60 seconds; now and then one runs past 110 and used to fail the whole
+ * scan. Stopping at 80 leaves 50 for a quick reading, which takes seconds: a rougher list to
+ * check is better than an error after two minutes.
+ */
+const CAREFUL_READING_MS = 80_000;
 
 /** What a teacher is told when the reader fails, by why it failed. */
 export function describeShelfFailure(reason: ShelfScanFailure): string {
@@ -108,6 +115,8 @@ export type ShelfScan = {
    * photo where it picked the wrong shelf is caught at once rather than trusted.
    */
   otherShelf: number;
+  /** The careful reading ran out of time and a quick one stood in, so the list wants a closer look. */
+  quick: boolean;
 };
 
 /** A count a teacher could plausibly mean for one shelf, or null. */
@@ -147,14 +156,25 @@ export async function scanShelf(
 
   const expected = options.expected ?? null;
   const deadline = Date.now() + READING_BUDGET_MS;
-  const { sightings: first, otherShelf: firstOther } = await readShelf(image, fetchFn, { expected, deadline });
+  let quick = false;
+  let firstReading;
+  try {
+    firstReading = await readShelf(image, fetchFn, { expected, deadline: Math.min(deadline, Date.now() + CAREFUL_READING_MS) });
+  } catch (error) {
+    if (!(error instanceof ShelfScanUnavailableError) || error.reason !== "timeout") throw error;
+    console.warn(`Shelf scan: careful reading too slow, reading quickly instead: ${error.message}`);
+    quick = true;
+    firstReading = await readShelf(image, fetchFn, { expected, deadline, quick });
+  }
+  const { sightings: first, otherShelf: firstOther } = firstReading;
   let sightings = mergeLooks(first, []);
   let otherShelf = firstOther;
 
   // Short of the teacher's count: one more look, with the first reading to go on. It is
   // best-effort, so a failure keeps the first reading rather than losing the whole scan.
   // An empty first reading is a photo with no shelf in it, and a count is no help there.
-  if (expected !== null && first.length > 0 && spinesSeen(first) < expected && deadline - Date.now() >= SECOND_LOOK_NEEDS_MS) {
+  // After a quick reading there's no time for a careful second one, which is what a second look is.
+  if (!quick && expected !== null && first.length > 0 && spinesSeen(first) < expected && deadline - Date.now() >= SECOND_LOOK_NEEDS_MS) {
     try {
       const again = await readShelf(image, fetchFn, { again: { expected, previous: first }, deadline });
       sightings = mergeLooks(first, again.sightings);
@@ -173,7 +193,7 @@ export async function scanShelf(
     missing: expected !== null ? Math.max(0, expected - seen) : 0,
     foundOnSecondLook: seen - spinesSeen(first),
   };
-  if (sightings.length === 0) return { slots: [], needsAttention: 0, tally, otherShelf };
+  if (sightings.length === 0) return { slots: [], needsAttention: 0, tally, otherShelf, quick };
 
   // Only the spines that were actually read cost a catalogue search; the rest already
   // know they need a human, and their place in the row is the useful thing about them.
@@ -204,7 +224,7 @@ export async function scanShelf(
     };
   });
 
-  return { slots, needsAttention: slots.filter((slot) => slot.proposal === null).length, tally, otherShelf };
+  return { slots, needsAttention: slots.filter((slot) => slot.proposal === null).length, tally, otherShelf, quick };
 }
 
 /** The suggestion a teacher sees first, or null when nothing matched that spine. */

@@ -41,7 +41,7 @@ type State =
   /** A photo picked, waiting to be cropped to one shelf (or sent whole). */
   | { kind: "cropping"; file: File; count: string }
   | { kind: "reading" }
-  | { kind: "review"; rows: Row[]; tally: ShelfTally; otherShelf: number }
+  | { kind: "review"; rows: Row[]; tally: ShelfTally; otherShelf: number; quick: boolean }
   | { kind: "adding"; done: number; total: number }
   | { kind: "error"; message: string };
 
@@ -68,7 +68,7 @@ const CONFIDENCE_LABEL: Record<MatchCandidate["confidence"], { text: string; cla
  * order so the list reads like the shelf: the row for a spine nobody could read sits
  * physically between its neighbours, which is most of the explanation it needs.
  */
-function reviewFrom(scan: Pick<ShelfScan, "slots"> & Partial<Pick<ShelfScan, "tally" | "otherShelf">>): State {
+function reviewFrom(scan: Pick<ShelfScan, "slots"> & Partial<Pick<ShelfScan, "tally" | "otherShelf" | "quick">>): State {
   // A shelf a phone sent before copies and counts existed has neither; read it as one copy
   // a spine, with no count to check against.
   const slots = scan.slots.map((slot) => ({
@@ -82,6 +82,7 @@ function reviewFrom(scan: Pick<ShelfScan, "slots"> & Partial<Pick<ShelfScan, "ta
     kind: "review",
     tally: scan.tally ?? { expected: null, seen, missing: 0, foundOnSecondLook: 0 },
     otherShelf: scan.otherShelf ?? 0,
+    quick: scan.quick ?? false,
     rows: slots.map((slot) => ({
       slot,
       chosen: 0,
@@ -113,7 +114,7 @@ type ShelfScanDialogProps = {
    * Slots that arrived from a paired phone, to review instead of taking a photo here.
    * The caller remounts on each new shelf, so this is only ever read once.
    */
-  incoming?: Pick<ShelfScan, "slots"> & Partial<Pick<ShelfScan, "tally" | "otherShelf">>;
+  incoming?: Pick<ShelfScan, "slots"> & Partial<Pick<ShelfScan, "tally" | "otherShelf" | "quick">>;
   /** The gap waiting for the next scan, if any. Owned above, since scans arrive there. */
   armedPosition: number | null;
   onArm: (position: number | null) => void;
@@ -269,6 +270,7 @@ export function ShelfScanDialog({
             rows={state.rows}
             tally={state.tally}
             otherShelf={state.otherShelf}
+            quick={state.quick}
             onChange={(rows) => setState({ ...state, rows })}
             armedPosition={armedPosition}
             onArm={onArm}
@@ -339,6 +341,7 @@ function ReviewList({
   rows,
   tally,
   otherShelf,
+  quick,
   onChange,
   armedPosition,
   onArm,
@@ -349,6 +352,7 @@ function ReviewList({
   rows: Row[];
   tally: ShelfTally;
   otherShelf: number;
+  quick: boolean;
   onChange: (rows: Row[]) => void;
   armedPosition: number | null;
   onArm: (position: number | null) => void;
@@ -528,6 +532,13 @@ function ReviewList({
           "Untick anything that looks wrong."
         )}
       </p>
+
+      {quick && (
+        <p className="text-body-sm text-tertiary">
+          This shelf was taking too long to read carefully, so it was read quickly instead. Check the list against the
+          shelf a little more closely than usual. Cropping to one shelf, or a closer photo, usually reads carefully in time.
+        </p>
+      )}
 
       {otherShelf > 0 && (
         <p className="text-body-sm text-on-surface-variant">
