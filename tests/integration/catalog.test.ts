@@ -1,4 +1,5 @@
-import { eq } from "drizzle-orm";
+import { readFileSync } from "node:fs";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Database } from "@/db/client";
 import { classes, copies, loans, students } from "@/db/schema";
@@ -190,6 +191,39 @@ describe("catalog", () => {
     await deleteBook(db, teacher, lonely.bookId);
   });
 
+  it("closes the gap a deleted copy leaves, keeping the copies in order", async () => {
+    const { bookId, copyIds } = await createBook(db, teacher, bookInput({ title: "Wonder" }), 3);
+    await deleteCopy(db, teacher, copyIds[0]);
+    const numbers = async () =>
+      Object.fromEntries((await getBookDetail(db, teacher, bookId)).copies.map((copy) => [copy.id, copy.copyNumber]));
+    expect(await numbers()).toEqual({ [copyIds[1]]: 1, [copyIds[2]]: 2 });
+
+    const { copyIds: [added] } = await addCopies(db, teacher, bookId, 1);
+    expect((await numbers())[added]).toBe(3);
+  });
+
+  it("closes the gaps already in the library, once, with a migration", async () => {
+    const gapped = await createBook(db, teacher, bookInput({ title: "Gapped" }), 3);
+    const tidy = await createBook(db, teacher, bookInput({ title: "Tidy" }), 2);
+    // As deleting copy 1 of three used to leave it, then one more added on the end.
+    await db.delete(copies).where(eq(copies.id, gapped.copyIds[0]));
+    await db.update(copies).set({ copyNumber: 7 }).where(eq(copies.id, gapped.copyIds[2]));
+
+    const migration = readFileSync("drizzle/0010_renumber_copies.sql", "utf8");
+    for (const statement of migration.split("--> statement-breakpoint")) await db.execute(sql.raw(statement));
+
+    const numbered = async (bookId: string) =>
+      (await getBookDetail(db, teacher, bookId)).copies.map((copy) => [copy.id, copy.copyNumber]);
+    expect(await numbered(gapped.bookId)).toEqual([
+      [gapped.copyIds[1], 1],
+      [gapped.copyIds[2], 2],
+    ]);
+    expect(await numbered(tidy.bookId)).toEqual([
+      [tidy.copyIds[0], 1],
+      [tidy.copyIds[1], 2],
+    ]);
+  });
+
   it("deletes a book students have read, and keeps it in their reading history", async () => {
     const t = await createTeacher(db, "History Teacher");
     const [klass] = await db.insert(classes).values({ teacherId: t, name: "Room 4", schoolYear: "2026–27" }).returning();
@@ -204,11 +238,12 @@ describe("catalog", () => {
     await checkInLoan(db, t, first.loanId);
     await checkInLoan(db, t, second.loanId);
 
-    // The copy goes first. Its checkout stays on the book's page, just without a copy number.
+    // The copy goes first. Its checkout stays on the book's page, just without a copy number,
+    // and the copy that's left is copy 1 now, on its own checkout too.
     await deleteCopy(db, t, copyIds[0]);
     const detail = await getBookDetail(db, t, bookId);
     expect(detail.copies.map((copy) => copy.id)).toEqual([copyIds[1]]);
-    expect(detail.history.map((loan) => loan.copyNumber).sort()).toEqual([2, null]);
+    expect(detail.history.map((loan) => loan.copyNumber).sort()).toEqual([1, null]);
 
     // A title fixed after the fact is what the history shows while the book is still here.
     await updateBookDetails(db, t, bookId, { title: "Hatchet (Anniversary Edition)" });

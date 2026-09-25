@@ -312,8 +312,8 @@ describe("handing over classes and books", () => {
 
       const copiesOf = (bookId: string) =>
         db.select({ id: copies.id, n: copies.copyNumber, teacherId: copies.teacherId }).from(copies).where(eq(copies.bookId, bookId)).orderBy(copies.copyNumber);
-      // Maria keeps each title and the rest of its copies.
-      expect(await copiesOf(hatchet.bookId)).toEqual([{ id: hatchet.copyIds[1], n: 2, teacherId: maria }]);
+      // Maria keeps each title and the rest of its copies, numbered from 1 again.
+      expect(await copiesOf(hatchet.bookId)).toEqual([{ id: hatchet.copyIds[1], n: 1, teacherId: maria }]);
       expect(await copiesOf(frindle.bookId)).toEqual([{ id: frindle.copyIds[0], n: 1, teacherId: maria }]);
       // Dan had no Hatchet, so he gets one with the same details; his Frindle gains two copies.
       const [dansHatchet] = await db.select().from(books).where(and(eq(books.teacherId, dan), eq(books.isbn13, HATCHET)));

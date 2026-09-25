@@ -71,6 +71,13 @@
       "when": 1790217035973,
       "tag": "0009_handover_waits",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790304653500,
+      "tag": "0010_renumber_copies",
+      "breakpoints": true
     }
   ]
 }
