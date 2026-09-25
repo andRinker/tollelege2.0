@@ -317,7 +317,8 @@ export function PhoneScanner() {
             />
           </label>
           <p className={cx("text-body-sm", shelfState === "failed" ? "text-error" : "text-on-surface-variant")}>
-            {shelfMessage ?? "Every book it finds is confirmed on your computer before it's added."}
+            {shelfMessage ??
+              "It helps, though it isn't necessary, if the books are standing upright and side by side. Every book it finds is confirmed on your computer before it's added."}
           </p>
         </div>
       )}

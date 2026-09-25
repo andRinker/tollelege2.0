@@ -287,8 +287,9 @@ function PhotoPicker({ onPick }: { onPick: (file: File, count: string) => void }
   return (
     <div className="flex flex-col gap-4 py-2 [--field-bg:var(--md-sys-color-surface-container-high)]">
       <p className="text-body-md text-on-surface-variant">
-        Take one photo of a single shelf, straight on, with the spines readable. Every book it finds is a suggestion
-        you confirm — nothing is added until you say so.
+        Take one photo of a single shelf, straight on, with the spines readable. It helps, though it isn&rsquo;t
+        necessary, if the books are standing upright and side by side. Every book it finds is a suggestion you
+        confirm — nothing is added until you say so.
       </p>
       <ShelfCountField value={count} onChange={setCount} />
       <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg bg-primary px-6 py-4 text-label-lg text-on-primary">
