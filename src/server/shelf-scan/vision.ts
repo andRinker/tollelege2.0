@@ -4,6 +4,12 @@ import "server-only";
 export type SpineReading = {
   title: string;
   author: string | null;
+  /**
+   * A series name printed as well as the book's own title, kept apart from it: catalogues
+   * file "The Nixie's Song", not "Beyond the Spiderwick Chronicles", which is the bigger
+   * print on its spine.
+   */
+  series?: string | null;
 };
 
 /**
@@ -73,6 +79,11 @@ const PROMPT = [
   'List every spine on that shelf, in order from left to right, in "spines".',
   "",
   'For a spine you can genuinely read, set "title", and "author" when an author is printed.',
+  "Many spines print a series name as well as the book's own title, often in bigger letters. Put the",
+  'book\'s own title in "title" and the series name in "series" (for example "The Nixie\'s Song" and',
+  '"Beyond the Spiderwick Chronicles"). If the series name is all you can read, the spine is unreadable:',
+  'leave "title" null and put the series name in "fragment".',
+  "",
   'For a spine you can see but cannot read, set "title" to null and put whatever IS legible in',
   '"fragment" — a few words of the title, a publisher, a series name. Leave "fragment" null when',
   "nothing at all is legible.",
@@ -143,6 +154,7 @@ const SCHEMA = {
         properties: {
           title: { type: "STRING", nullable: true },
           author: { type: "STRING", nullable: true },
+          series: { type: "STRING", nullable: true },
           fragment: { type: "STRING", nullable: true },
         },
       },
@@ -165,7 +177,7 @@ function text(value: unknown, max: number): string {
 
 function cleanSighting(value: unknown): SpineSighting | null {
   if (!value || typeof value !== "object") return null;
-  const record = value as { title?: unknown; author?: unknown; fragment?: unknown };
+  const record = value as { title?: unknown; author?: unknown; series?: unknown; fragment?: unknown };
 
   const title = text(record.title, 300);
   if (!title) {
@@ -174,7 +186,11 @@ function cleanSighting(value: unknown): SpineSighting | null {
     return { reading: null, fragment: fragment || null, copies: 1 };
   }
   const author = text(record.author, 200);
-  return { reading: { title, author: author || null }, fragment: null, copies: 1 };
+  const series = text(record.series, 200);
+  // A series name the reader copied into both fields is no series at all.
+  const reading: SpineReading = { title, author: author || null };
+  if (series && series.toLowerCase() !== title.toLowerCase()) reading.series = series;
+  return { reading, fragment: null, copies: 1 };
 }
 
 /**

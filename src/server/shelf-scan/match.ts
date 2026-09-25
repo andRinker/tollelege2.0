@@ -45,13 +45,49 @@ function compareTitles(read: string, candidate: string): TitleAgreement {
   return shared / Math.max(readWords.size, 1) >= 0.7 ? "close" : "none";
 }
 
-function gradeMatch(reading: SpineReading, title: string, authors: string[]): MatchConfidence | null {
-  const titleAgreement = compareTitles(reading.title, title);
+/**
+ * The ways a title read off a spine might be filed. "Beyond the Spiderwick Chronicles: The
+ * Nixie's Song" is catalogued as "The Nixie's Song", so each part is tried on its own as well
+ * as the whole.
+ */
+export function titleForms(title: string): string[] {
+  const forms = [title];
+  for (const part of title.split(/\s*[:;—–]\s*|\s+-\s+/)) {
+    const key = compareKey(part);
+    // A part worth searching for: a few letters at least, and not just "Book 2".
+    if (key.replace(/\s/g, "").length >= 4 && !/^(book|volume|vol|part|no)\s*\d+$/.test(key) && !forms.includes(part)) {
+      forms.push(part);
+    }
+  }
+  return forms;
+}
+
+/**
+ * How well a spine's title fits a record's, trying each part of the spine's title and the
+ * record with its subtitle. Only the whole of what was read can be exact: a record that
+ * matches one part of it is the same book at best, and a subtitled edition stays "close".
+ */
+function bestTitleAgreement(read: string, candidate: string, subtitle?: string | null): TitleAgreement {
+  const candidates = subtitle ? [candidate, `${candidate}: ${subtitle}`] : [candidate];
+  let best: TitleAgreement = "none";
+  for (const left of titleForms(read)) {
+    for (const right of candidates) {
+      const agreement = compareTitles(left, right);
+      if (agreement === "exact" && left === read) return "exact";
+      if (agreement !== "none") best = "close";
+    }
+  }
+  return best;
+}
+
+function gradeMatch(reading: SpineReading, title: string, authors: string[], subtitle?: string | null): MatchConfidence | null {
+  const titleAgreement = bestTitleAgreement(reading.title, title, subtitle);
   const authorAgreement = compareAuthors(reading.author, authors);
   if (titleAgreement === "none") {
     // A letter misread ("Jumbles" for "Jumbies") is worth offering only when the author
     // backs it up, and even then as a book to check, never one ticked for the teacher.
-    return authorAgreement === "agrees" && nearlySameTitle(reading.title, title) ? "weak" : null;
+    const nearly = titleForms(reading.title).some((form) => nearlySameTitle(form, title));
+    return authorAgreement === "agrees" && nearly ? "weak" : null;
   }
   if (titleAgreement === "exact") {
     // A perfect title over a contradicting author is the shape a wrong book takes.
@@ -66,7 +102,7 @@ function gradeMatch(reading: SpineReading, title: string, authors: string[]): Ma
  * already owns, where a different printing of the same title is exactly what we want to catch.
  */
 export function looksLikeSameBook(reading: SpineReading, title: string, authors: string[]): boolean {
-  if (compareTitles(reading.title, title) === "none") return false;
+  if (bestTitleAgreement(reading.title, title) === "none") return false;
   return compareAuthors(reading.author, authors) !== "disagrees";
 }
 
@@ -76,14 +112,20 @@ async function getJson(url: string, fetchFn: typeof fetch): Promise<unknown | nu
       headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS),
     });
-    return response.ok ? await response.json() : null;
+    if (!response.ok) {
+      // Only the host: the URL carries the Google Books key. A 429 here means the day's quota
+      // is spent, and every spine after it is being searched in one catalogue instead of two.
+      console.warn(`Shelf scan: catalogue search refused by ${new URL(url).host} (HTTP ${response.status})`);
+      return null;
+    }
+    return await response.json();
   } catch {
     // A search that fails is one fewer suggestion, never a failed scan.
     return null;
   }
 }
 
-type RawCandidate = { isbn13: string; title: string; authors: string[]; coverUrl: string | null };
+type RawCandidate = { isbn13: string; title: string; subtitle: string | null; authors: string[]; coverUrl: string | null };
 
 /** What to ask a catalogue for. Either may be left out, never both. */
 type Query = { title: string | null; author: string | null };
@@ -99,6 +141,7 @@ async function searchGoogleBooks(query: Query, fetchFn: typeof fetch): Promise<R
     items?: {
       volumeInfo?: {
         title?: string;
+        subtitle?: string;
         authors?: string[];
         industryIdentifiers?: { type?: string; identifier?: string }[];
         imageLinks?: { thumbnail?: string; smallThumbnail?: string };
@@ -115,6 +158,7 @@ async function searchGoogleBooks(query: Query, fetchFn: typeof fetch): Promise<R
     found.push({
       isbn13,
       title: info.title,
+      subtitle: info.subtitle ?? null,
       authors: info.authors ?? [],
       coverUrl: thumbnail ? thumbnail.replace(/^http:/, "https:").replace("&edge=curl", "") : null,
     });
@@ -125,12 +169,12 @@ async function searchGoogleBooks(query: Query, fetchFn: typeof fetch): Promise<R
 async function searchOpenLibrary(query: Query, fetchFn: typeof fetch): Promise<RawCandidate[]> {
   const params = new URLSearchParams({
     limit: String(query.title ? RESULTS_PER_SOURCE : AUTHOR_RESULTS),
-    fields: "title,author_name,isbn,cover_i",
+    fields: "title,subtitle,author_name,isbn,cover_i",
   });
   if (query.title) params.set("title", query.title);
   if (query.author) params.set("author", query.author);
   const data = (await getJson(`https://openlibrary.org/search.json?${params}`, fetchFn)) as {
-    docs?: { title?: string; author_name?: string[]; isbn?: string[]; cover_i?: number }[];
+    docs?: { title?: string; subtitle?: string; author_name?: string[]; isbn?: string[]; cover_i?: number }[];
   } | null;
 
   const found: RawCandidate[] = [];
@@ -140,6 +184,7 @@ async function searchOpenLibrary(query: Query, fetchFn: typeof fetch): Promise<R
     found.push({
       isbn13,
       title: doc.title,
+      subtitle: doc.subtitle ?? null,
       authors: doc.author_name ?? [],
       coverUrl: doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : null,
     });
@@ -155,15 +200,18 @@ const CONFIDENCE_ORDER: Record<MatchConfidence, number> = { exact: 0, close: 1, 
  * one on the shelf is rarely whichever a search happens to rank first.
  *
  * Both catalogues are asked by title and the first author printed, and when that finds
- * nothing, asked again more loosely: by title alone, since a spine's author is often
- * printed oddly or read wrong, and then by author alone, for a title with a letter misread.
+ * nothing, asked again more loosely: by each part of a title printed with its series, by
+ * title alone, since a spine's author is often printed oddly or read wrong, and then by
+ * author alone, for a title with a letter misread.
  * A looser search only ever runs for a spine the stricter one couldn't place, and what it
  * finds is still graded against everything read off the spine.
  */
 export async function matchSpine(reading: SpineReading, fetchFn: typeof fetch = fetch): Promise<SpineMatch> {
   const author = leadAuthor(reading.author);
-  const queries: Query[] = [{ title: reading.title, author }];
-  if (author) queries.push({ title: reading.title, author: null }, { title: null, author });
+  // The whole title first, then each part of one printed with its series.
+  const forms = titleForms(reading.title).slice(0, 3);
+  const queries: Query[] = forms.map((title) => ({ title, author }));
+  if (author) queries.push(...forms.map((title) => ({ title, author: null })), { title: null, author });
 
   for (const query of queries) {
     const candidates = grade(reading, await searchBoth(query, fetchFn));
@@ -180,7 +228,7 @@ async function searchBoth(query: Query, fetchFn: typeof fetch): Promise<RawCandi
 function grade(reading: SpineReading, found: RawCandidate[]): MatchCandidate[] {
   const byIsbn = new Map<string, MatchCandidate>();
   for (const raw of found) {
-    const confidence = gradeMatch(reading, raw.title, raw.authors);
+    const confidence = gradeMatch(reading, raw.title, raw.authors, raw.subtitle);
     if (!confidence) continue;
     const existing = byIsbn.get(raw.isbn13);
     if (existing && CONFIDENCE_ORDER[existing.confidence] <= CONFIDENCE_ORDER[confidence]) {
