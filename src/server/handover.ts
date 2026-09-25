@@ -13,6 +13,7 @@ import {
   students,
   user,
 } from "@/db/schema";
+import { renumberCopies } from "./copy-numbers";
 import { ConflictError, NotFoundError } from "./errors";
 
 /*
@@ -575,6 +576,8 @@ export async function acceptHandover(db: Database, toId: string, handoverId: str
             .returning({ id: books.id });
         }
         await moveCopies(given, targetId);
+        // The copies the sender keeps close ranks, as after deleting one.
+        await renumberCopies(tx, book.id);
         // Only checkouts going with a student still name these copies; the rest let go above.
         await tx.update(loans).set({ bookId: targetId }).where(inArray(loans.copyId, given.map((copy) => copy.id)));
       }

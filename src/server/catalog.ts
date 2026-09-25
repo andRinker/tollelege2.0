@@ -2,6 +2,7 @@ import { and, asc, count, desc, eq, ilike, isNotNull, isNull, max, or, type SQL,
 import type { Database } from "@/db/client";
 import { books, type CopyStatus, copies, loans, type MetadataSource, students } from "@/db/schema";
 import { normalizeIsbn } from "@/lib/isbn";
+import { renumberCopies } from "./copy-numbers";
 import { inScope } from "./coteaching";
 import { ConflictError, isUniqueViolation, NotFoundError } from "./errors";
 import type { BookMetadata } from "./isbn-lookup";
@@ -187,7 +188,10 @@ export async function undoQuickAdd(db: Database, teacherId: string, copyId: stri
 
     await tx.delete(copies).where(eq(copies.id, copyId));
     const [{ remaining }] = await tx.select({ remaining: count() }).from(copies).where(eq(copies.bookId, copy.bookId));
-    if (remaining > 0) return "copy_removed";
+    if (remaining > 0) {
+      await renumberCopies(tx, copy.bookId);
+      return "copy_removed";
+    }
     await tx.delete(books).where(and(eq(books.id, copy.bookId), eq(books.teacherId, teacherId)));
     return "book_removed";
   });
@@ -276,6 +280,7 @@ export async function deleteCopy(db: Database, teacherId: string, copyId: string
     const [{ copyCount }] = await tx.select({ copyCount: count() }).from(copies).where(eq(copies.bookId, copy.bookId));
     if (copyCount <= 1) throw new ConflictError("This is the book's only copy. Delete the book instead.");
     await tx.delete(copies).where(eq(copies.id, copyId));
+    await renumberCopies(tx, copy.bookId);
   });
 }
 

@@ -3,6 +3,7 @@ import { alias } from "drizzle-orm/pg-core";
 import type { Database } from "@/db/client";
 import { books, copies, loans, shelfLoans, teacherConnections, user } from "@/db/schema";
 import { requireConnection } from "./connections";
+import { renumberCopies } from "./copy-numbers";
 import { ConflictError, isUniqueViolation, NotFoundError } from "./errors";
 
 const SHELF_PAGE_SIZE = 24;
@@ -399,6 +400,7 @@ export async function returnShelfLoan(
           .from(copies)
           .where(eq(copies.bookId, shadow.bookId));
         if (remaining === 0) await tx.delete(books).where(eq(books.id, shadow.bookId));
+        else await renumberCopies(tx, shadow.bookId);
       }
     }
 
