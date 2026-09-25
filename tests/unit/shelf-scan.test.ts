@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { matchSpine } from "@/server/shelf-scan/match";
+import { matchSpine, titleForms } from "@/server/shelf-scan/match";
 import { findOwned } from "@/server/shelf-scan/owned";
 import { mergeLooks, scanShelf, tidyShelf } from "@/server/shelf-scan";
 import { fragmentFits, leadAuthor, sameTitle } from "@/server/shelf-scan/titles";
@@ -121,6 +121,26 @@ describe("grading a spine against a catalogue record", () => {
       expect(match.candidates).toEqual([expect.objectContaining({ isbn13: jumbies.isbn13, confidence: "weak" })]);
     });
 
+    it("finds a book whose spine printed its series with its title", async () => {
+      const nixie = { title: "The Nixie's Song", authors: ["Tony DiTerlizzi", "Holly Black"], isbn13: "9780689871313" };
+      const { fetchFn, searches } = openLibrary((query) => (query.title === "The Nixie's Song" ? [nixie] : []));
+      const match = await matchSpine({ title: "Beyond the Spiderwick Chronicles: The Nixie's Song", author: "DiTerlizzi/Black" }, fetchFn);
+      expect(searches[0]).toEqual({ title: "Beyond the Spiderwick Chronicles: The Nixie's Song", author: "DiTerlizzi" });
+      // Matched on part of what was read, so a close match rather than an exact one.
+      expect(match.candidates[0]).toMatchObject({ isbn13: nixie.isbn13, confidence: "close" });
+    });
+
+    it("says in the log when a catalogue refuses, without the key", async () => {
+      vi.stubEnv("GOOGLE_BOOKS_API_KEY", "secret-key");
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const fetchFn = (async () => new Response("quota", { status: 429 })) as typeof fetch;
+      await matchSpine({ title: "Frindle", author: null }, fetchFn);
+      const logged = warn.mock.calls.map((call) => String(call[0])).join("\n");
+      expect(logged).toContain("www.googleapis.com (HTTP 429)");
+      expect(logged).not.toContain("secret-key");
+      warn.mockRestore();
+    });
+
     it("doesn't take a misread title by someone else", async () => {
       const { fetchFn } = openLibrary(() => [{ title: "Rise of the Jumbies", authors: ["Someone Else"], isbn13: "9781616206154" }]);
       expect((await matchSpine({ title: "Rise of the Jumbles", author: "Baptiste" }, fetchFn)).candidates).toEqual([]);
@@ -152,6 +172,16 @@ describe("comparing what a spine says", () => {
     expect(sameTitle("The One and Only Ivan", "The One and Only Bob")).toBe(false);
     expect(sameTitle("Holes", "Hole")).toBe(false);
     expect(sameTitle("Cat", "Hat")).toBe(false);
+  });
+
+  it("tries each part of a title printed with its series, but not a bare book number", () => {
+    expect(titleForms("Beyond the Spiderwick Chronicles: The Nixie's Song")).toEqual([
+      "Beyond the Spiderwick Chronicles: The Nixie's Song",
+      "Beyond the Spiderwick Chronicles",
+      "The Nixie's Song",
+    ]);
+    expect(titleForms("Warriors - Book 2")).toEqual(["Warriors - Book 2", "Warriors"]);
+    expect(titleForms("Frindle")).toEqual(["Frindle"]);
   });
 
   it("fits a fragment only to a title whose words it starts, in order", () => {
@@ -191,6 +221,22 @@ describe("reading spines from a photo", () => {
     vi.stubEnv("GEMINI_API_KEY", "test-key");
     const sightings = await readSpines(image, geminiReturning([{ title: "Orthodoxy" }]));
     expect(sightings).toEqual([{ reading: { title: "Orthodoxy", author: null }, fragment: null, copies: 1 }]);
+  });
+
+  it("keeps a series name apart from the book's own title", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    const spines = await readSpines(
+      image,
+      geminiReturning([
+        { title: "The Nixie's Song", author: "DiTerlizzi", series: "Beyond the Spiderwick Chronicles" },
+        // Copied into both fields, it's no series at all.
+        { title: "Frindle", author: "Clements", series: "Frindle" },
+      ]),
+    );
+    expect(spines.map((spine) => spine.reading)).toEqual([
+      { title: "The Nixie's Song", author: "DiTerlizzi", series: "Beyond the Spiderwick Chronicles" },
+      { title: "Frindle", author: "Clements" },
+    ]);
   });
 
   it("keeps a spine it could see but not read, in its place on the shelf", async () => {
