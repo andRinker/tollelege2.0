@@ -217,11 +217,17 @@ export async function readShelf(
     expected = null,
     again,
     deadline = Date.now() + TIMEOUT_MS,
+    quick = false,
   }: {
     expected?: number | null;
     again?: { expected: number; previous: SpineSighting[] };
     /** When this reading must be finished by (epoch ms), so a scan fits in its request. */
     deadline?: number;
+    /**
+     * Read with little thinking: seconds rather than a minute, at the cost of more spines
+     * left unread or muddled. Only for when a careful reading has already run out of time.
+     */
+    quick?: boolean;
   } = {},
 ): Promise<ShelfReading> {
   if (process.env.SHELF_SCAN_FIXTURES === "1") {
@@ -232,7 +238,7 @@ export async function readShelf(
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new ShelfScanUnavailableError("GEMINI_API_KEY is not set.", "unconfigured");
   let model = configuredModel();
-  const pass = again ? "second look" : "first reading";
+  const pass = again ? "second look" : quick ? "quick reading" : "first reading";
   const body = JSON.stringify({
     contents: [
       {
@@ -247,7 +253,7 @@ export async function readShelf(
       responseMimeType: "application/json",
       responseSchema: SCHEMA,
       temperature: 0,
-      ...thinkingConfig(),
+      ...(quick ? { thinkingConfig: { thinkingLevel: "low" } } : thinkingConfig()),
     },
   });
 

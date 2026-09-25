@@ -213,9 +213,10 @@ export function PhoneScanner() {
         tally?.expected != null && tally.seen < tally.expected ? ` Saw ${tally.seen} of the ${tally.expected} you counted.` : "";
       const other =
         body.otherShelf > 0 ? ` Left out ${body.otherShelf} from another shelf in the photo.` : "";
+      const quick = body.quick ? " It was slow, so it was read quickly: check it closely." : "";
       setShelfMessage(
         body.found > 0
-          ? `Found ${body.found} ${body.found === 1 ? "book" : "books"}.${counted}${needs}${other} Confirm on your computer.`
+          ? `Found ${body.found} ${body.found === 1 ? "book" : "books"}.${counted}${needs}${other}${quick} Confirm on your computer.`
           : "No spines could be read. Try a straighter photo of one shelf.",
       );
       setShelfCount("");
