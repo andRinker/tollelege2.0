@@ -198,6 +198,29 @@ describe("lookupIsbn", () => {
     vi.unstubAllEnvs();
   });
 
+  it("keeps nothing it learned while a source was down", async () => {
+    vi.stubEnv("GOOGLE_BOOKS_API_KEY", "test-key");
+    // Google has spent its day's quota; Open Library doesn't know the ISBN.
+    const halfDown = vi.fn((async (input: RequestInfo | URL) => {
+      if (String(input).includes("googleapis.com")) return new Response("quota", { status: 429 });
+      return String(input).includes("search.json") ? Response.json({ docs: [] }) : new Response("", { status: 404 });
+    }) as Fetch);
+    expect(await lookupIsbn(testDb.db, "9780689871313", { fetchFn: halfDown })).toEqual({ status: "unavailable" });
+
+    // Tomorrow Google answers, and nothing cached stands in its way.
+    const recovered = vi.fn((async (input: RequestInfo | URL) => {
+      if (String(input).includes("googleapis.com")) {
+        return Response.json({ items: [{ volumeInfo: { title: "The Nixie's Song", authors: ["Tony DiTerlizzi", "Holly Black"] } }] });
+      }
+      return String(input).includes("search.json") ? Response.json({ docs: [] }) : new Response("", { status: 404 });
+    }) as Fetch);
+    expect(await lookupIsbn(testDb.db, "9780689871313", { fetchFn: recovered })).toMatchObject({
+      status: "found",
+      metadata: { title: "The Nixie's Song" },
+    });
+    vi.unstubAllEnvs();
+  });
+
   it("reports network failures as unavailable without caching them", async () => {
     const failing = vi.fn((async () => {
       throw new TypeError("fetch failed");

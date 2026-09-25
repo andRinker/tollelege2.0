@@ -22,6 +22,12 @@ type LookupOptions = { fetchFn?: Fetch; now?: Date };
  * answer, because each source is stronger in different fields — see `mergeMetadata`.
  * Network failures aren't cached, and one source being down never hides a book the
  * other one knows.
+ *
+ * Nor is any answer given while a source was down. With Google Books refusing (its daily
+ * quota spent, say) and Open Library not knowing the ISBN, "not found" was cached for a day,
+ * and a book Google knows perfectly well couldn't be scanned or typed in until it expired.
+ * So a book only one source could answer for is returned but not kept, and none at all is
+ * "unavailable", with Try again, rather than "not found".
  */
 export async function lookupIsbn(db: Database, isbn13: string, options: LookupOptions = {}): Promise<LookupResult> {
   const now = options.now ?? new Date();
@@ -56,6 +62,7 @@ export async function lookupIsbn(db: Database, isbn13: string, options: LookupOp
   if (answered === 0) return { status: "unavailable" };
 
   const metadata = mergeMetadata(answers[0] ?? null, answers[1] ?? null);
+  if (answered < attempts.length) return metadata ? { status: "found", metadata } : { status: "unavailable" };
 
   await db
     .insert(isbnLookupCache)

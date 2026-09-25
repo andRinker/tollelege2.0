@@ -58,7 +58,7 @@ npx vercel link && npx vercel env pull .env.local
 
 `src/server/isbn-lookup/` asks Open Library and Google Books **at once** and merges them, rather than stopping at the first answer — each is stronger in different fields, and taking one whole record gives a worse book than combining both. Google's records come from publisher feeds (properly cased titles, clean author lists); Open Library's come from library catalogues (publisher, page count, cover, blurb). `merge.ts` also un-inverts `Last, First` author names and de-duplicates them. Results are cached in `isbn_lookup_cache`, shared across teachers, for 90 days when found and a day when not.
 
-A lookup only reports `unavailable` when *every* configured source failed; one source being down must never hide a book the other knows.
+A lookup only reports `unavailable` when *every* configured source failed; one source being down must never hide a book the other knows. Nor is anything cached while a source is down: a book only one source answered for is returned but not kept, and with none it's `unavailable`, not `not_found`. A "not found" cached while Google Books was refusing (its daily quota is a 429) hid The Nixie's Song for a day; migration 0011 cleared those.
 
 ## Shelf photos
 
