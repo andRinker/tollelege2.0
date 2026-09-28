@@ -3,13 +3,14 @@
 import { useState } from "react";
 import { Form } from "react-aria-components";
 import { BookFields, bookInputFromForm, type BookFormValue } from "@/components/book-form";
+import type { GenreOption } from "@/components/genre";
 import type { ReadingLevelSystem } from "@/db/schema/enums";
 import { Button } from "@/ui/components/button";
 import { ConfirmDialog, Dialog } from "@/ui/components/dialog";
 import { useSnackbar } from "@/ui/components/snackbar";
 import { deleteBookAction, updateBookAction } from "./actions";
 
-export type BookSuggestions = { tags: string[]; locations: string[] };
+export type BookSuggestions = { tags: string[]; locations: string[]; genres?: GenreOption[] };
 
 /**
  * Editing a book's details, shared by the book's own page and the library list so the two

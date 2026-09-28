@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { MetadataSource, ReadingLevelSystem } from "@/db/schema/enums";
 import type { BookDetailsInput } from "@/server/catalog";
 import type { BookMetadata } from "@/server/isbn-lookup";
+import { type GenreOption, GenreSelect } from "./genre";
 import { cx } from "@/ui/cx";
 import { AssistChip, InputChipGroup } from "@/ui/components/chip";
 import { IconButton } from "@/ui/components/icon-button";
@@ -28,6 +29,7 @@ export type BookFormValue = {
   description: string;
   coverUrl: string | null;
   metadataSource: MetadataSource;
+  genreId: string | null;
 };
 
 export const EMPTY_BOOK: BookFormValue = {
@@ -45,6 +47,7 @@ export const EMPTY_BOOK: BookFormValue = {
   description: "",
   coverUrl: null,
   metadataSource: "manual",
+  genreId: null,
 };
 
 export function bookFormFromMetadata(metadata: BookMetadata): BookFormValue {
@@ -78,6 +81,7 @@ export function bookFormFromBook(book: {
   description: string | null;
   coverUrl: string | null;
   metadataSource: MetadataSource;
+  genreId?: string | null;
 }): BookFormValue {
   return {
     isbn: book.isbn13 ?? "",
@@ -94,6 +98,7 @@ export function bookFormFromBook(book: {
     description: book.description ?? "",
     coverUrl: book.coverUrl,
     metadataSource: book.metadataSource,
+    genreId: book.genreId ?? null,
   };
 }
 
@@ -121,10 +126,11 @@ export function bookInputFromForm(value: BookFormValue): BookDetailsInput {
     location: value.location.trim() || null,
     notes: value.notes.trim() || null,
     metadataSource: value.metadataSource,
+    genreId: value.genreId,
   };
 }
 
-type Suggestions = { tags: string[]; locations: string[] };
+type Suggestions = { tags: string[]; locations: string[]; genres?: GenreOption[] };
 
 type FieldProps = {
   value: BookFormValue;
@@ -185,6 +191,9 @@ export function TagEditor({ tags, onChange, suggestions }: { tags: string[]; onC
 export function ShelvingFields({ value, onChange, readingLevelSystem, suggestions }: FieldProps) {
   return (
     <div className="flex flex-col gap-4">
+      {suggestions.genres && (
+        <GenreSelect genres={suggestions.genres} value={value.genreId} onChange={(genreId) => onChange({ ...value, genreId })} />
+      )}
       <div className={cx("grid gap-4", readingLevelSystem !== "none" && "medium:grid-cols-2")}>
         {readingLevelSystem !== "none" && (
           <TextField

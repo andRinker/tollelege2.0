@@ -14,6 +14,7 @@ export function parseLibraryFilters(params: SearchParams): Required<Pick<BookLis
     tag: first(params.tag) || undefined,
     readingLevel: first(params.level) || undefined,
     location: first(params.bin) || undefined,
+    genre: first(params.genre) || undefined,
     sort: (["title", "author", "recent"] as const).includes(sort as BookSort) ? (sort as BookSort) : "title",
     page: Number.isInteger(page) && page > 0 ? page : 1,
   };

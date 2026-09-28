@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, check, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import { user } from "./auth";
 import {
   readingLevelSystems,
@@ -29,6 +29,8 @@ export const teacherSettings = pgTable(
     themeContrast: text("theme_contrast", { enum: themeContrasts })
       .notNull()
       .default("standard"),
+    /** Whether the starter genres have been given, so a teacher who deletes them all keeps none. */
+    genresSeeded: boolean("genres_seeded").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()

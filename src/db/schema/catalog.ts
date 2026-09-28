@@ -13,7 +13,30 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { user } from "./auth";
-import { copyStatuses, metadataSources, sqlList } from "./enums";
+import { copyStatuses, genreColors, metadataSources, sqlList } from "./enums";
+
+/**
+ * A teacher's own genres, each with the colour of the dot on its spines. Every teacher starts
+ * with a set (`STARTER_GENRES`) and may rename, recolour, reorder, add or delete them.
+ */
+export const genres = pgTable(
+  "genres",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teacherId: text("teacher_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    color: text("color", { enum: genreColors }).notNull(),
+    position: integer("position").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("genres_id_teacher_unique").on(t.id, t.teacherId),
+    uniqueIndex("genres_teacher_name_unique").on(t.teacherId, sql`lower(${t.name})`),
+    check("genres_color_check", sql.raw(`color in ${sqlList(genreColors)}`)),
+  ],
+);
 
 /** A title in a teacher's library. Physical items are rows in `copies`. */
 export const books = pgTable(
@@ -37,6 +60,8 @@ export const books = pgTable(
     /** Bin or shelf label. */
     location: text("location"),
     notes: text("notes"),
+    /** One genre per title, the teacher's own. Deleting the genre leaves the book with none. */
+    genreId: uuid("genre_id"),
     /** Offered to connected teachers. On by default; turn it off for class sets. */
     lendable: boolean("lendable").notNull().default(true),
     metadataSource: text("metadata_source", { enum: metadataSources })
@@ -54,6 +79,13 @@ export const books = pgTable(
       .on(t.teacherId, t.isbn13)
       .where(sql`${t.isbn13} is not null`),
     index("books_teacher_title_idx").on(t.teacherId, t.title),
+    // ON DELETE SET NULL ("genre_id") in the migration, by hand: drizzle writes a plain
+    // SET NULL, which would null "teacher_id" too and fail.
+    foreignKey({
+      name: "books_genre_fk",
+      columns: [t.genreId, t.teacherId],
+      foreignColumns: [genres.id, genres.teacherId],
+    }).onDelete("set null"),
     check("books_isbn13_format", sql`${t.isbn13} is null or ${t.isbn13} ~ '^97[89][0-9]{10}$'`),
     check(
       "books_metadata_source_check",

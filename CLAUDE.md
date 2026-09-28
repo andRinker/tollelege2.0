@@ -54,6 +54,17 @@ npx vercel link && npx vercel env pull .env.local
 - **A title's copies are always numbered 1, 2, 3…** Anything that takes a copy away from a title (deleting it, undoing a rapid-scan add, a stand-in going home, copies handed over) calls `renumberCopies` in `src/server/copy-numbers.ts` on what is left, in order. Past checkouts follow their copy, so a checkout of the old copy 2 reads copy 1 once copy 1 is gone. Migration 0010 closed the gaps that came before.
 - **A checkout outlives the book.** A student's reading history belongs to the student, so deleting a book or copy they read must not erase it. Each `loans` row records `book_title` and `book_authors` when it's made, and `copy_id`/`book_id` go null on delete. Readers show the book's live title while it exists and the recorded one after, so `leftJoin` from `loans`, never `innerJoin`. Only a book still out with a student can't be deleted, and the `loans_open_has_copy` check enforces that in the database too. Those two foreign keys are `ON DELETE SET NULL (column)` in the migration, because a plain `SET NULL` would also null `teacher_id` and fail. drizzle can't write the column list, so carry it across by hand if the keys are ever regenerated.
 
+## Genres
+
+A teacher's shelves are sorted by genre and each spine wears a coloured dot, so a book has **exactly one** genre (`books.genre_id`), from the teacher's own list in `genres`. `src/server/genres.ts` owns them.
+
+- **Every teacher starts with the chart most classrooms use** (`STARTER_GENRES`): Historical and Realistic Fiction green, Graphic Novels blue, Fantasy and Science Fiction orange, Mystery and Horror red, Poetry/Inspirational pink, Nonfiction (any kind) yellow. They're seeded the first time a teacher's genres are read, not in a migration and not at sign-up, and `teacher_settings.genres_seeded` records it, so a teacher who deletes them all doesn't get them back.
+- **Colours are a fixed palette** (`genreColors`, hex in `src/lib/genre-colors.ts`), a deliberate exception to "theme tokens only": a dot must match the sticker on the spine in light mode and dark. Two genres may share a colour, as on the chart.
+- `books_genre_fk` is composite `(genre_id, teacher_id)`, so a book can't wear another teacher's genre, and it's `ON DELETE SET NULL ("genre_id")` and `DEFERRABLE` by hand in migration 0012, for the same reasons as the keys in 0003 and 0007. Deleting a genre leaves its books with none.
+- Genres are the owner's, managed on `/settings/genres` with `requireTeacher()`. A co-teacher can put a book in one of the owner's genres, as they can edit books.
+- **A hand-over carries a genre by name**: the recipient's genre of that name, any case, or a new one in the sender's colour (`genreForRecipient`).
+- Connected teachers don't see genres in Lending, so `/privacy` doesn't mention them; say so there first if that changes.
+
 ## Book metadata
 
 `src/server/isbn-lookup/` asks Open Library and Google Books **at once** and merges them, rather than stopping at the first answer — each is stronger in different fields, and taking one whole record gives a worse book than combining both. Google's records come from publisher feeds (properly cased titles, clean author lists); Open Library's come from library catalogues (publisher, page count, cover, blurb). `merge.ts` also un-inverts `Last, First` author names and de-duplicates them. Results are cached in `isbn_lookup_cache`, shared across teachers, for 90 days when found and a day when not.

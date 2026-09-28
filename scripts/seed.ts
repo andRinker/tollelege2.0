@@ -8,6 +8,7 @@ import { account, copies, loans, students, user } from "../src/db/schema";
 import { addDays, schoolYearLabel, todayInTimeZone } from "../src/lib/dates";
 import { isValidIsbn13 } from "../src/lib/isbn";
 import { createBook } from "../src/server/catalog";
+import { listGenres } from "../src/server/genres";
 import { createClass, importStudents } from "../src/server/roster";
 import { updateTeacherSettings } from "../src/server/settings";
 
@@ -119,6 +120,19 @@ async function main() {
   }
   const studentIds = (await db.select({ id: students.id }).from(students).where(eq(students.teacherId, teacherId))).map((row) => row.id);
 
+  // Each demo book takes the first starter genre its tags name, else Realistic Fiction.
+  const genreByName = new Map((await listGenres(db, teacherId)).map((genre) => [genre.name.toLowerCase(), genre.id]));
+  const GENRE_FROM_TAG: Record<string, string> = {
+    "graphic novel": "graphic novels",
+    fantasy: "fantasy",
+    "science fiction": "science fiction",
+    mystery: "mystery",
+    "historical fiction": "historical fiction",
+    poetry: "poetry/inspirational",
+  };
+  const genreFor = (tags: string[]) =>
+    genreByName.get(tags.map((tag) => GENRE_FROM_TAG[tag]).find(Boolean) ?? "realistic fiction") ?? null;
+
   const copyIds: string[] = [];
   /** What each checkout records about its book, looked up by the copy it took. */
   const bookOf = new Map<string, { bookId: string; bookTitle: string; bookAuthors: string[] }>();
@@ -142,6 +156,7 @@ async function main() {
         location: pick(BINS),
         notes: null,
         metadataSource: "manual",
+        genreId: genreFor(tags),
       },
       copyCount,
     );
