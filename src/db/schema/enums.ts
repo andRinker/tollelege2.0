@@ -51,3 +51,10 @@ export function sqlList(values: readonly string[]): string {
 /** What an admin did to or with a teacher's account. Recorded in `admin_audit`. */
 export const adminActions = ["created_account", "viewed_account", "started_acting", "stopped_acting", "signed_out", "deleted_account"] as const;
 export type AdminAction = (typeof adminActions)[number];
+
+/**
+ * Colours a genre can wear. Fixed hues rather than theme tokens: a genre's dot has to match
+ * the sticker on the spine, in light mode and dark. Hex values live in `src/lib/genre-colors.ts`.
+ */
+export const genreColors = ["green", "blue", "orange", "red", "pink", "yellow", "purple", "teal", "brown", "grey"] as const;
+export type GenreColor = (typeof genreColors)[number];

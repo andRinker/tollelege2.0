@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Availability } from "@/components/availability";
 import { BookCover } from "@/components/book-cover";
+import { GenreLabel } from "@/components/genre";
 import { bookFormFromBook, type BookFormValue } from "@/components/book-form";
 import type { ReadingLevelSystem } from "@/db/schema/enums";
 import type { BookListItem } from "@/server/catalog";
@@ -95,6 +96,7 @@ function LibraryRow({ book, readingLevelSystem, suggestions, canManage }: { book
             {book.authors.length > 0 && <span className="truncate">{book.authors.join(", ")}</span>}
             <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <Availability available={book.availableCopies} total={book.totalCopies} />
+              {book.genre && <GenreLabel genre={book.genre} className="text-label-md text-on-surface-variant" />}
               {!lendable && (
                 <span className="inline-flex items-center gap-1 text-label-md text-on-surface-variant">
                   <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-outline" />

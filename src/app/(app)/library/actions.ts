@@ -83,6 +83,7 @@ const bookDetails = z.object({
   location: optionalText(60),
   notes: optionalText(2000),
   metadataSource: z.enum(metadataSources),
+  genreId: z.uuid().nullable().optional(),
 });
 
 const id = z.uuid();

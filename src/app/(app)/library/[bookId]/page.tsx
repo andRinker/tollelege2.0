@@ -9,7 +9,9 @@ import type { CopyStatus } from "@/db/schema/enums";
 import { describeDueDate, formatInstant, isOverdue, todayInTimeZone } from "@/lib/dates";
 import { formatIsbn13 } from "@/lib/isbn";
 import { READING_LEVEL_FIELD_LABELS } from "@/lib/reading-levels";
+import { GenreLabel } from "@/components/genre";
 import { catalogSummary, getBookDetail } from "@/server/catalog";
+import { listGenres } from "@/server/genres";
 import { NotFoundError } from "@/server/errors";
 import { copyLendingStates } from "@/server/lending";
 import { requireClassroom } from "@/server/session";
@@ -41,13 +43,14 @@ export default async function BookPage({ params }: PageProps<"/library/[bookId]"
     if (error instanceof NotFoundError) notFound();
     throw error;
   });
-  const [settings, summary, lendingStates] = await Promise.all([
+  const [settings, summary, lendingStates, genres] = await Promise.all([
     getRequestSettings(),
     catalogSummary(db, teacherId),
     copyLendingStates(db, teacherId, bookId),
+    listGenres(db, teacherId),
   ]);
   const today = todayInTimeZone(settings.timeZone);
-  const { book, copies, history } = detail;
+  const { book, genre, copies, history } = detail;
 
   const inCirculation = copies.filter((copy) => copy.status === "in_circulation");
   // A copy out to a class a co-teacher can't see has no loan attached, but it's still not on the shelf.
@@ -76,7 +79,7 @@ export default async function BookPage({ params }: PageProps<"/library/[bookId]"
           <BookActions
             book={book}
             readingLevelSystem={settings.readingLevelSystem}
-            suggestions={{ tags: summary.tags, locations: summary.locations }}
+            suggestions={{ tags: summary.tags, locations: summary.locations, genres }}
             canDelete={isOwner}
           />
         }
@@ -98,7 +101,7 @@ export default async function BookPage({ params }: PageProps<"/library/[bookId]"
         </aside>
 
         <div className="flex min-w-0 flex-col gap-6">
-          {(facts.length > 0 || book.tags.length > 0 || book.description || book.notes) && (
+          {(facts.length > 0 || genre || book.tags.length > 0 || book.description || book.notes) && (
             <section className="flex flex-col gap-4 rounded-xl bg-surface-container-low p-5 medium:p-6">
               {facts.length > 0 && (
                 <dl className="grid grid-cols-2 gap-x-6 gap-y-3 medium:grid-cols-3">
@@ -109,6 +112,17 @@ export default async function BookPage({ params }: PageProps<"/library/[bookId]"
                     </div>
                   ))}
                 </dl>
+              )}
+              {genre && book.genreId && (
+                <LinkButton
+                  href={`/library?genre=${book.genreId}`}
+                  variant="tonal"
+                  size="xs"
+                  className="self-start"
+                  aria-label={`Genre: ${genre.name}. See all ${genre.name}`}
+                >
+                  <GenreLabel genre={genre} />
+                </LinkButton>
               )}
               {book.tags.length > 0 && (
                 <ul aria-label="Tags" className="flex flex-wrap gap-2">

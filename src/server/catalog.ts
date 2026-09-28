@@ -1,9 +1,10 @@
 import { and, asc, count, desc, eq, ilike, isNotNull, isNull, max, or, type SQL, sql } from "drizzle-orm";
 import type { Database } from "@/db/client";
-import { books, type CopyStatus, copies, loans, type MetadataSource, students } from "@/db/schema";
+import { books, type CopyStatus, copies, type GenreColor, genres, loans, type MetadataSource, students } from "@/db/schema";
 import { normalizeIsbn } from "@/lib/isbn";
 import { renumberCopies } from "./copy-numbers";
 import { inScope } from "./coteaching";
+import { assertGenreOwned } from "./genres";
 import { ConflictError, isUniqueViolation, NotFoundError } from "./errors";
 import type { BookMetadata } from "./isbn-lookup";
 import { assertNotInShelfLoan } from "./lending";
@@ -23,6 +24,8 @@ export type BookDetailsInput = {
   location: string | null;
   notes: string | null;
   metadataSource: MetadataSource;
+  /** The teacher's own genre, or null for none. Left out, a book's genre is left alone. */
+  genreId?: string | null;
 };
 
 export const MAX_TAGS = 12;
@@ -61,6 +64,7 @@ export async function createBook(
   input: BookDetailsInput,
   copyCount = 1,
 ): Promise<{ bookId: string; copyIds: string[] }> {
+  await assertGenreOwned(db, teacherId, input.genreId ?? null);
   try {
     return await db.transaction(async (tx) => {
       const [book] = await tx
@@ -199,6 +203,7 @@ export async function undoQuickAdd(db: Database, teacherId: string, copyId: stri
 
 export async function updateBookDetails(db: Database, teacherId: string, bookId: string, input: Partial<BookDetailsInput>) {
   const values = input.tags ? { ...input, tags: normalizeTags(input.tags) } : input;
+  if (input.genreId !== undefined) await assertGenreOwned(db, teacherId, input.genreId);
   try {
     const updated = await db
       .update(books)
@@ -293,6 +298,8 @@ export type BookListFilters = {
   tag?: string;
   readingLevel?: string;
   location?: string;
+  /** A genre id, or "none" for books without one. */
+  genre?: string;
   sort?: BookSort;
   page?: number;
   pageSize?: number;
@@ -308,6 +315,7 @@ export type BookListItem = {
   readingLevel: string | null;
   tags: string[];
   location: string | null;
+  genre: { name: string; color: GenreColor } | null;
   /** Offered to connected teachers; the list marks the titles held back. */
   lendable: boolean;
   totalCopies: number;
@@ -353,6 +361,8 @@ export async function listBooks(db: Database, teacherId: string, filters: BookLi
   if (filters.tag) conditions.push(sql`${filters.tag} = any(${books.tags})`);
   if (filters.readingLevel) conditions.push(eq(books.readingLevel, filters.readingLevel));
   if (filters.location) conditions.push(eq(books.location, filters.location));
+  if (filters.genre === "none") conditions.push(isNull(books.genreId));
+  else if (filters.genre && /^[0-9a-f-]{36}$/i.test(filters.genre)) conditions.push(eq(books.genreId, filters.genre));
   if (filters.availability === "available") conditions.push(sql`coalesce(${copyCounts.available}, 0) > 0`);
   if (filters.availability === "out") conditions.push(sql`coalesce(${copyCounts.total}, 0) > coalesce(${copyCounts.available}, 0)`);
 
@@ -378,19 +388,26 @@ export async function listBooks(db: Database, teacherId: string, filters: BookLi
         readingLevel: books.readingLevel,
         tags: books.tags,
         location: books.location,
+        genreName: genres.name,
+        genreColor: genres.color,
         lendable: books.lendable,
         totalCopies: sql<number>`coalesce(${copyCounts.total}, 0)`.mapWith(Number),
         availableCopies: sql<number>`coalesce(${copyCounts.available}, 0)`.mapWith(Number),
       })
       .from(books)
       .leftJoin(copyCounts, eq(copyCounts.bookId, books.id))
+      .leftJoin(genres, and(eq(genres.id, books.genreId), eq(genres.teacherId, books.teacherId)))
       .where(where)
       .orderBy(...orderBy)
       .limit(pageSize)
       .offset((page - 1) * pageSize),
   ]);
 
-  return { items: rows as BookListItem[], total, page, pageCount: Math.max(1, Math.ceil(total / pageSize)) };
+  const items: BookListItem[] = rows.map(({ genreName, genreColor, ...row }) => ({
+    ...row,
+    genre: genreName && genreColor ? { name: genreName, color: genreColor } : null,
+  }));
+  return { items, total, page, pageCount: Math.max(1, Math.ceil(total / pageSize)) };
 }
 
 export async function catalogSummary(db: Database, teacherId: string) {
@@ -495,7 +512,10 @@ export async function getBookDetail(db: Database, teacherId: string, bookId: str
       ? { ...copy, loanId: null, studentId: null, studentFirstName: null, studentLastName: null, borrowerHidden: true }
       : { ...copy, borrowerHidden: false },
   );
-  return { book, copies: copiesSeen, history };
+  const [genre] = book.genreId
+    ? await db.select({ name: genres.name, color: genres.color }).from(genres).where(eq(genres.id, book.genreId))
+    : [];
+  return { book, genre: genre ?? null, copies: copiesSeen, history };
 }
 
 export type BookDetail = Awaited<ReturnType<typeof getBookDetail>>;

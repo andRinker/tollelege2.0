@@ -1,5 +1,6 @@
 "use client";
 
+import type { GenreOption } from "@/components/genre";
 import { AnimatePresence, motion } from "motion/react";
 import { useRouter } from "next/navigation";
 import { useCallback, useRef, useState } from "react";
@@ -53,7 +54,7 @@ import { type PairedPhone, PhonePairing } from "./phone-pairing";
 import { type GapFill, ShelfScanDialog } from "./shelf-scan";
 import { type ScanFeedEvent, useScanFeed } from "./use-scan-feed";
 
-type Suggestions = { tags: string[]; locations: string[] };
+type Suggestions = { tags: string[]; locations: string[]; genres?: GenreOption[] };
 
 type LookupState = { status: "idle" } | { status: "loading"; isbn13: string } | Exclude<LookupActionResult, { status: "invalid" }>;
 

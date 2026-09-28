@@ -7,6 +7,7 @@ import {
   classTeacherInvites,
   classTeachers,
   copies,
+  genres,
   handovers,
   loans,
   shelfLoans,
@@ -15,6 +16,7 @@ import {
 } from "@/db/schema";
 import { renumberCopies } from "./copy-numbers";
 import { ConflictError, NotFoundError } from "./errors";
+import { genreForRecipient } from "./genres";
 
 /*
  * Handing classes and books to another teacher.
@@ -433,7 +435,7 @@ export async function acceptHandover(db: Database, toId: string, handoverId: str
       partial = partial.filter((copy) => !emptied.includes(copy.bookId));
 
       const moving = await tx
-        .select({ id: books.id, isbn13: books.isbn13 })
+        .select({ id: books.id, isbn13: books.isbn13, genreId: books.genreId })
         .from(books)
         .where(and(eq(books.teacherId, fromId), inList(books.id, [...offer.bookIds, ...emptied])))
         .for("update");
@@ -540,8 +542,27 @@ export async function acceptHandover(db: Database, toId: string, handoverId: str
       }
 
       const whole = bookIds.filter((id) => !joining.some((book) => book.id === id));
+
+      // Genres are each teacher's own, so a book that moves takes its genre by name: the
+      // recipient's genre of that name, or a new one in the sender's colour.
+      const senderGenreIds = [...new Set([...moving, ...partialBooks].flatMap((book) => (book.genreId ? [book.genreId] : [])))];
+      const genreFor = new Map<string, string>();
+      if (senderGenreIds.length > 0) {
+        const senderGenres = await tx
+          .select({ id: genres.id, name: genres.name, color: genres.color })
+          .from(genres)
+          .where(and(eq(genres.teacherId, fromId), inArray(genres.id, senderGenreIds)));
+        for (const genre of senderGenres) genreFor.set(genre.id, await genreForRecipient(tx, toId, genre));
+      }
+
       if (whole.length > 0) {
-        await tx.update(books).set({ teacherId: toId }).where(and(eq(books.teacherId, fromId), inArray(books.id, whole)));
+        await tx.update(books).set({ teacherId: toId, genreId: null }).where(and(eq(books.teacherId, fromId), inArray(books.id, whole)));
+        for (const [senderGenreId, recipientGenreId] of genreFor) {
+          const wearing = moving.filter((book) => whole.includes(book.id) && book.genreId === senderGenreId).map((book) => book.id);
+          if (wearing.length > 0) {
+            await tx.update(books).set({ genreId: recipientGenreId }).where(and(eq(books.teacherId, toId), inArray(books.id, wearing)));
+          }
+        }
         await tx.update(copies).set({ teacherId: toId }).where(and(eq(copies.teacherId, fromId), inArray(copies.bookId, whole)));
       }
 
@@ -572,6 +593,7 @@ export async function acceptHandover(db: Database, toId: string, handoverId: str
               notes: book.notes,
               lendable: book.lendable,
               metadataSource: book.metadataSource,
+              genreId: book.genreId ? (genreFor.get(book.genreId) ?? null) : null,
             })
             .returning({ id: books.id });
         }

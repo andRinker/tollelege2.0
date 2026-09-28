@@ -224,6 +224,9 @@ export function SettingsForm({ settings, teacher, timeZones }: Props) {
           >
             {(item) => <ListBoxItem id={item.id}>{item.name}</ListBoxItem>}
           </Select>
+          <LinkButton href="/settings/genres" variant="tonal" icon={iconPalette} className="self-start">
+            Genres and dot colours
+          </LinkButton>
         </SettingsSection>
 
         <SettingsSection

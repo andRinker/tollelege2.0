@@ -9,6 +9,7 @@ import { Menu, MenuItem, MenuTrigger } from "@/ui/components/menu";
 import { LinearProgress } from "@/ui/components/progress";
 import { SearchField } from "@/ui/components/text-field";
 import { iconGridView, iconSort, iconViewList } from "@/ui/icons/generated";
+import { type GenreOption, GenreLabel } from "@/components/genre";
 import { LIBRARY_VIEW_COOKIE, type LibraryView } from "./filters";
 
 type Props = {
@@ -17,11 +18,14 @@ type Props = {
   tag?: string;
   level?: string;
   bin?: string;
+  genre?: string;
   sort: string;
   view: LibraryView;
   tags: string[];
   readingLevels: string[];
   locations: string[];
+  /** Genres with at least one book, in the teacher's order. */
+  genres: GenreOption[];
 };
 
 const SORTS = [
@@ -30,7 +34,7 @@ const SORTS = [
   { id: "recent", label: "Recently added" },
 ];
 
-export function LibraryFilters({ query, availability, tag, level, bin, sort, view, tags, readingLevels, locations }: Props) {
+export function LibraryFilters({ query, availability, tag, level, bin, genre, sort, view, tags, readingLevels, locations, genres }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -123,8 +127,17 @@ export function LibraryFilters({ query, availability, tag, level, bin, sort, vie
         </ConnectedButtonGroup>
       </div>
 
-      {(tags.length > 0 || readingLevels.length > 0 || locations.length > 0) && (
+      {(genres.length > 0 || tags.length > 0 || readingLevels.length > 0 || locations.length > 0) && (
         <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] medium:mx-0 medium:flex-wrap medium:px-0">
+          {genres.map((option) => (
+            <FilterChip
+              key={`genre-${option.id}`}
+              isSelected={genre === option.id}
+              onChange={(selected) => update({ genre: selected ? option.id : undefined })}
+            >
+              <GenreLabel genre={option} />
+            </FilterChip>
+          ))}
           {readingLevels.map((value) => (
             <FilterChip key={`level-${value}`} isSelected={level === value} onChange={(selected) => update({ level: selected ? value : undefined })}>
               {`Level ${value}`}
