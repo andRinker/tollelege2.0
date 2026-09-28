@@ -27,6 +27,7 @@ import {
   updateBookDetails,
 } from "@/server/catalog";
 import { isUserFacingError } from "@/server/errors";
+import { setAddingGenre } from "@/server/genres";
 import { type BookMetadata, lookupIsbn } from "@/server/isbn-lookup";
 import { addBookByScan, type QuickAddOutcome } from "@/server/quick-add";
 import { assertOwner } from "@/server/coteaching";
@@ -145,6 +146,22 @@ export async function quickAddAction(raw: string): Promise<QuickAddActionResult>
     return outcome;
   } catch (error) {
     return { status: "error", isbn13: normalizeIsbn(String(raw)) ?? "", message: handleError(error).message };
+  }
+}
+
+/**
+ * Chooses the genre every book added from now on is given. It's the classroom's, like the
+ * genres themselves, so a co-teacher cataloguing a shelf sets it for the owner's library.
+ */
+export async function setAddingGenreAction(genreId: string | null): Promise<ActionResult> {
+  const classroom = await requireClassroom();
+  const parsed = id.nullable().safeParse(genreId);
+  if (!parsed.success) return fail("That genre wasn't found.");
+  try {
+    await setAddingGenre(getDb(), classroom.teacherId, parsed.data);
+    return ok();
+  } catch (error) {
+    return handleError(error);
   }
 }
 

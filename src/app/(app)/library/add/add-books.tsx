@@ -1,6 +1,6 @@
 "use client";
 
-import type { GenreOption } from "@/components/genre";
+import { type GenreOption, GenreSelect } from "@/components/genre";
 import { AnimatePresence, motion } from "motion/react";
 import { useRouter } from "next/navigation";
 import { useCallback, useRef, useState } from "react";
@@ -48,6 +48,7 @@ import {
   type LookupActionResult,
   lookupIsbnAction,
   quickAddAction,
+  setAddingGenreAction,
   undoQuickAddAction,
 } from "../actions";
 import { type PairedPhone, PhonePairing } from "./phone-pairing";
@@ -82,9 +83,11 @@ type AddBooksProps = {
   scanCursor: number;
   /** Whether to offer a phone as the scanner. Off in a classroom you co-teach. */
   phonePairing?: boolean;
+  /** The genre books added here are given, saved for the teacher so phone scans use it too. */
+  addingGenreId?: string | null;
 };
 
-export function AddBooks({ readingLevelSystem, suggestions, pairedPhones, scanCursor, phonePairing = true }: AddBooksProps) {
+export function AddBooks({ readingLevelSystem, suggestions, pairedPhones, scanCursor, phonePairing = true, addingGenreId = null }: AddBooksProps) {
   const router = useRouter();
   const showSnackbar = useSnackbar();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -107,6 +110,23 @@ export function AddBooks({ readingLevelSystem, suggestions, pairedPhones, scanCu
   const [gapFills, setGapFills] = useState<Record<number, GapFill>>({});
   /** The gap the manual form was opened for, so its row can be closed off on save. */
   const [handGap, setHandGap] = useState<number | null>(null);
+  const [addingGenre, setAddingGenre] = useState<string | null>(addingGenreId);
+  /** A blank book form, already in the genre being catalogued. */
+  const blankBook = { ...EMPTY_BOOK, genreId: addingGenre };
+
+  async function chooseAddingGenre(genreId: string | null) {
+    const previous = addingGenre;
+    setAddingGenre(genreId);
+    const result = await setAddingGenreAction(genreId);
+    if (!result.ok) {
+      setAddingGenre(previous);
+      showSnackbar({ message: result.message });
+    }
+  }
+
+  const genres = suggestions.genres ?? [];
+  const genrePicker = (label: string) =>
+    genres.length > 0 ? <GenreSelect genres={genres} value={addingGenre} onChange={(genreId) => void chooseAddingGenre(genreId)} label={label} /> : null;
 
   const fillGap = useCallback(
     (position: number, fill: GapFill) => {
@@ -302,6 +322,14 @@ export function AddBooks({ readingLevelSystem, suggestions, pairedPhones, scanCu
             </Button>
           </div>
         </Form>
+        {genres.length > 0 && (
+          <div className="flex flex-col gap-1">
+            {genrePicker("Genre for new books")}
+            <p className="px-4 text-body-sm text-on-surface-variant">
+              Every book you add gets it, however it&rsquo;s added, until you change it. A book already on your shelves keeps its own.
+            </p>
+          </div>
+        )}
         <div className="rounded-lg bg-surface-container px-4 py-3">
           <Switch isSelected={rapid} onChange={setRapid}>
             <span className="flex flex-col">
@@ -313,7 +341,7 @@ export function AddBooks({ readingLevelSystem, suggestions, pairedPhones, scanCu
         <Button variant="tonal" size="md" icon={iconPhotoCamera} onPress={() => setShelfOpen(true)} className="self-start">
           Photograph a shelf
         </Button>
-        <Button variant="text" icon={iconEdit} className="self-start" onPress={() => setManual({ ...EMPTY_BOOK })}>
+        <Button variant="text" icon={iconEdit} className="self-start" onPress={() => setManual(blankBook)}>
           Add a book without an ISBN
         </Button>
       </Section>
@@ -326,18 +354,19 @@ export function AddBooks({ readingLevelSystem, suggestions, pairedPhones, scanCu
 
       <div className="flex min-w-0 flex-col gap-4">
         {rapid ? (
-          <RapidScanList entries={entries} addedCount={addedCount} onUndo={undo} onEnterDetails={(isbn13) => setManual({ ...EMPTY_BOOK, isbn: isbn13 })} onRetry={(isbn13) => quickAdd(isbn13)} />
+          <RapidScanList entries={entries} addedCount={addedCount} onUndo={undo} onEnterDetails={(isbn13) => setManual({ ...blankBook, isbn: isbn13 })} onRetry={(isbn13) => quickAdd(isbn13)} />
         ) : (
           <LookupResult
             state={lookup}
             readingLevelSystem={readingLevelSystem}
             suggestions={suggestions}
+            addingGenre={addingGenre}
             onDone={(message, bookId) => {
               setLookup({ status: "idle" });
               refocus();
               showSnackbar({ message, action: bookId ? { label: "View", onAction: () => router.push(`/library/${bookId}`) } : undefined });
             }}
-            onEnterDetails={(isbn13) => setManual({ ...EMPTY_BOOK, isbn: isbn13 })}
+            onEnterDetails={(isbn13) => setManual({ ...blankBook, isbn: isbn13 })}
             onRetry={(isbn13) => lookUp(isbn13)}
           />
         )}
@@ -356,9 +385,10 @@ export function AddBooks({ readingLevelSystem, suggestions, pairedPhones, scanCu
         onArm={setArmedGap}
         gapResults={gapFills}
         onFillGap={addIntoGap}
+        genrePicker={genrePicker("Genre for this shelf")}
         onAddByHand={(position, title) => {
           setHandGap(position);
-          setManual({ ...EMPTY_BOOK, title });
+          setManual({ ...blankBook, title });
         }}
       />
 
@@ -412,6 +442,7 @@ function LookupResult({
   state,
   readingLevelSystem,
   suggestions,
+  addingGenre,
   onDone,
   onEnterDetails,
   onRetry,
@@ -419,6 +450,7 @@ function LookupResult({
   state: LookupState;
   readingLevelSystem: ReadingLevelSystem;
   suggestions: Suggestions;
+  addingGenre: string | null;
   onDone: (message: string, bookId?: string) => void;
   onEnterDetails: (isbn13: string) => void;
   onRetry: (isbn13: string) => void;
@@ -447,7 +479,7 @@ function LookupResult({
           </Section>
         )}
         {state.status === "found" && (
-          <FoundBook key={state.isbn13} state={state} readingLevelSystem={readingLevelSystem} suggestions={suggestions} onDone={onDone} />
+          <FoundBook key={state.isbn13} state={state} readingLevelSystem={readingLevelSystem} suggestions={suggestions} addingGenre={addingGenre} onDone={onDone} />
         )}
         {state.status === "owned" && <OwnedBook state={state} onDone={onDone} />}
         {(state.status === "not_found" || state.status === "unavailable") && (
@@ -486,15 +518,17 @@ function FoundBook({
   state,
   readingLevelSystem,
   suggestions,
+  addingGenre,
   onDone,
 }: {
   state: Extract<LookupActionResult, { status: "found" }>;
   readingLevelSystem: ReadingLevelSystem;
   suggestions: Suggestions;
+  addingGenre: string | null;
   onDone: (message: string, bookId?: string) => void;
 }) {
   const showSnackbar = useSnackbar();
-  const [value, setValue] = useState(() => bookFormFromMetadata(state.metadata));
+  const [value, setValue] = useState(() => ({ ...bookFormFromMetadata(state.metadata), genreId: addingGenre }));
   const [copies, setCopies] = useState(1);
   const [pending, setPending] = useState(false);
   const { metadata } = state;

@@ -122,6 +122,11 @@ type ShelfScanDialogProps = {
   gapResults: Record<number, GapFill>;
   onFillGap: (position: number, isbn13: string) => Promise<string | null>;
   onAddByHand: (position: number, title: string) => void;
+  /**
+   * The "genre for new books" picker, shown above the review so a shelf's genre can be set
+   * right before confirming it. Books added from the review take it on the server.
+   */
+  genrePicker?: React.ReactNode;
 };
 
 export function ShelfScanDialog({
@@ -133,6 +138,7 @@ export function ShelfScanDialog({
   gapResults,
   onFillGap,
   onAddByHand,
+  genrePicker,
 }: ShelfScanDialogProps) {
   const [state, setState] = useState<State>(() => (incoming ? reviewFrom(incoming) : { kind: "idle" }));
   const showSnackbar = useSnackbar();
@@ -264,6 +270,8 @@ export function ShelfScanDialog({
             </Button>
           </div>
         )}
+
+        {state.kind === "review" && genrePicker}
 
         {state.kind === "review" && (
           <ReviewList

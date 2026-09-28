@@ -1,4 +1,4 @@
-import { and, asc, count, eq, max } from "drizzle-orm";
+import { and, asc, count, eq, isNull, max } from "drizzle-orm";
 import type { Database } from "@/db/client";
 import { books, type GenreColor, genres, teacherSettings } from "@/db/schema";
 import { ConflictError, isUniqueViolation, NotFoundError } from "./errors";
@@ -181,4 +181,36 @@ export async function genreForRecipient(
     .values({ teacherId: recipientId, name: genre.name, color: genre.color, position: (last ?? -1) + 1 })
     .returning({ id: genres.id });
   return created.id;
+}
+
+/** The genre new books are given, or null for none. */
+export async function getAddingGenre(db: Database, teacherId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ addingGenreId: teacherSettings.addingGenreId })
+    .from(teacherSettings)
+    .where(eq(teacherSettings.teacherId, teacherId))
+    .limit(1);
+  return row?.addingGenreId ?? null;
+}
+
+export async function setAddingGenre(db: Database, teacherId: string, genreId: string | null): Promise<void> {
+  await assertGenreOwned(db, teacherId, genreId);
+  await db
+    .insert(teacherSettings)
+    .values({ teacherId, addingGenreId: genreId })
+    .onConflictDoUpdate({ target: teacherSettings.teacherId, set: { addingGenreId: genreId, updatedAt: new Date() } });
+}
+
+/**
+ * Gives a book just added the genre new books are getting, unless it already has one. A
+ * copy of a book already on the shelves never changes that book's genre; a title that had
+ * none takes it, since the teacher is holding it while working through that genre's shelf.
+ */
+export async function applyAddingGenre(db: Database, teacherId: string, bookId: string): Promise<void> {
+  const genreId = await getAddingGenre(db, teacherId);
+  if (!genreId) return;
+  await db
+    .update(books)
+    .set({ genreId })
+    .where(and(eq(books.id, bookId), eq(books.teacherId, teacherId), isNull(books.genreId)));
 }
