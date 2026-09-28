@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
-import { boolean, check, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, check, foreignKey, integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { user } from "./auth";
+import { genres } from "./catalog";
 import {
   readingLevelSystems,
   sqlList,
@@ -31,6 +32,12 @@ export const teacherSettings = pgTable(
       .default("standard"),
     /** Whether the starter genres have been given, so a teacher who deletes them all keeps none. */
     genresSeeded: boolean("genres_seeded").notNull().default(false),
+    /**
+     * The genre every book added from now on is given, until changed: a teacher catalogues
+     * one genre shelf at a time. Kept here rather than in the browser so a paired phone,
+     * which adds on the server, uses it too.
+     */
+    addingGenreId: uuid("adding_genre_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
@@ -38,6 +45,13 @@ export const teacherSettings = pgTable(
       .$onUpdate(() => new Date()),
   },
   (t) => [
+    // ON DELETE SET NULL ("adding_genre_id") is written into the migration by hand, as for
+    // books_genre_fk: a plain SET NULL would null teacher_id, the primary key, too.
+    foreignKey({
+      name: "teacher_settings_adding_genre_fk",
+      columns: [t.addingGenreId, t.teacherId],
+      foreignColumns: [genres.id, genres.teacherId],
+    }).onDelete("set null"),
     check(
       "teacher_settings_loan_period_range",
       sql`${t.loanPeriodDays} is null or ${t.loanPeriodDays} between 1 and 365`,

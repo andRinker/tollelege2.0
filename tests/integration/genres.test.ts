@@ -7,11 +7,14 @@ import { NotFoundError } from "@/server/errors";
 import {
   createGenre,
   deleteGenre,
+  getAddingGenre,
   listGenres,
   moveGenre,
+  setAddingGenre,
   STARTER_GENRES,
   updateGenre,
 } from "@/server/genres";
+import { addBookByScan } from "@/server/quick-add";
 import { acceptHandover, offerHandover, pendingHandoversTo } from "@/server/handover";
 import { createTeacher, createTestDb, type TestDatabase } from "../helpers/test-db";
 
@@ -102,6 +105,45 @@ describe("genres", () => {
     const [book] = await db.select().from(books).where(eq(books.id, bookId));
     expect(book).toMatchObject({ title: "Coraline", genreId: null, teacherId: teacher });
     expect((await listBooks(db, teacher, { genre: "none" })).total).toBe(2);
+  });
+
+  it("gives new books the genre being catalogued, but never changes a book that has one", async () => {
+    process.env.ISBN_LOOKUP_FIXTURES = "1";
+    const teacher = await createTeacher(db);
+    const other = await createTeacher(db);
+    const all = await listGenres(db, teacher);
+    const fantasy = all.find((genre) => genre.name === "Fantasy")!;
+    const mystery = all.find((genre) => genre.name === "Mystery")!;
+    const genreOf = async (bookId: string) =>
+      (await db.select({ genreId: books.genreId }).from(books).where(eq(books.id, bookId)))[0].genreId;
+
+    // Nothing chosen: a scan adds a book with no genre.
+    const plain = await addBookByScan(db, teacher, "9780545010221");
+    expect(plain.status === "added" && (await genreOf(plain.result.bookId))).toBeNull();
+
+    await setAddingGenre(db, teacher, fantasy.id);
+    expect(await getAddingGenre(db, teacher)).toBe(fantasy.id);
+    await expect(setAddingGenre(db, other, fantasy.id)).rejects.toBeInstanceOf(NotFoundError);
+
+    // A new title takes it.
+    const scanned = await addBookByScan(db, teacher, "9780439708180");
+    if (scanned.status !== "added") throw new Error(scanned.status);
+    expect(scanned.result.outcome).toBe("created");
+    expect(await genreOf(scanned.result.bookId)).toBe(fantasy.id);
+
+    // A copy of a title with no genre gives the title one.
+    const copy = await addBookByScan(db, teacher, "9780545010221");
+    expect(copy.status === "added" && copy.result.outcome).toBe("copy_added");
+    expect(await genreOf(plain.status === "added" ? plain.result.bookId : "")).toBe(fantasy.id);
+
+    // A copy of a title that has a genre leaves it alone.
+    const { bookId } = await createBook(db, teacher, bookInput({ title: "Holes", isbn13: "9780064440202", genreId: mystery.id }));
+    await addBookByScan(db, teacher, "9780064440202");
+    expect(await genreOf(bookId)).toBe(mystery.id);
+
+    // Deleting the genre clears the choice with it.
+    await deleteGenre(db, teacher, fantasy.id);
+    expect(await getAddingGenre(db, teacher)).toBeNull();
   });
 
   it("keeps a handed-over book's genre by name, making it for the recipient if they lack it", async () => {

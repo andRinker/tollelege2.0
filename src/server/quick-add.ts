@@ -1,6 +1,7 @@
 import type { Database } from "@/db/client";
 import { normalizeIsbn } from "@/lib/isbn";
 import { addCopies, findBookByIsbn, type QuickAddResult, quickAddByIsbn } from "./catalog";
+import { applyAddingGenre } from "./genres";
 import { lookupIsbn } from "./isbn-lookup";
 
 export type QuickAddOutcome =
@@ -16,6 +17,8 @@ export type QuickAddOutcome =
  *
  * A book the teacher already owns gains a copy without a metadata lookup, which is both
  * faster and the right answer: a second physical copy is not a second title.
+ *
+ * Either way the book takes the teacher's "genre for new books" if it has no genre yet.
  */
 export async function addBookByScan(db: Database, teacherId: string, raw: string): Promise<QuickAddOutcome> {
   const isbn13 = normalizeIsbn(String(raw));
@@ -24,6 +27,7 @@ export async function addBookByScan(db: Database, teacherId: string, raw: string
   const owned = await findBookByIsbn(db, teacherId, isbn13);
   if (owned) {
     const { copyIds, totalCopies } = await addCopies(db, teacherId, owned.id);
+    await applyAddingGenre(db, teacherId, owned.id);
     return {
       status: "added",
       isbn13,
@@ -41,5 +45,7 @@ export async function addBookByScan(db: Database, teacherId: string, raw: string
 
   const lookup = await lookupIsbn(db, isbn13);
   if (lookup.status !== "found") return { status: lookup.status, isbn13 };
-  return { status: "added", isbn13, result: await quickAddByIsbn(db, teacherId, isbn13, lookup.metadata) };
+  const result = await quickAddByIsbn(db, teacherId, isbn13, lookup.metadata);
+  await applyAddingGenre(db, teacherId, result.bookId);
+  return { status: "added", isbn13, result };
 }

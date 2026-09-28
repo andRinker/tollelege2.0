@@ -64,6 +64,7 @@ A teacher's shelves are sorted by genre and each spine wears a coloured dot, so 
 - Genres are the owner's, managed on `/settings/genres` with `requireTeacher()`. A co-teacher can put a book in one of the owner's genres, as they can edit books.
 - **A hand-over carries a genre by name**: the recipient's genre of that name, any case, or a new one in the sender's colour (`genreForRecipient`).
 - Connected teachers don't see genres in Lending, so `/privacy` doesn't mention them; say so there first if that changes.
+- **A genre can be set while cataloguing.** Teachers shelve one genre at a time, so Add books has a "Genre for new books" picker, also shown above a shelf photo's review. It's saved as `teacher_settings.adding_genre_id` rather than kept in the browser, because a paired phone adds on the server. The Look-up and by-hand forms start in it, and `addBookByScan` applies it (`applyAddingGenre`) to a new title and to a copy of a title with **no** genre yet; a book that has a genre keeps it. Its key is `ON DELETE SET NULL ("adding_genre_id")` by hand in migration 0013, since `teacher_id` is the table's primary key.
 
 ### Acting on many books at once
 

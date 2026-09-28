@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { getDb } from "@/db/client";
 import { catalogSummary } from "@/server/catalog";
 import { describeExpiry, latestScanEventSeq, listActivePairings } from "@/server/scan-pairing";
-import { listGenres } from "@/server/genres";
+import { getAddingGenre, listGenres } from "@/server/genres";
 import { requireClassroom } from "@/server/session";
 import { getRequestSettings } from "@/server/theme";
 import { LinkButton } from "@/ui/components/button";
@@ -24,10 +24,11 @@ export default async function AddBooksPage() {
   // Phone pairing is the owner's: it's revoked when *they* sign out, so a co-teacher's
   // pairing would outlive their session with no one to end it. The feed that follows it
   // is read by the owner's cookie too. Everything else on this page works the same.
-  const [settings, summary, genres, pairedPhones, scanCursor] = await Promise.all([
+  const [settings, summary, genres, addingGenreId, pairedPhones, scanCursor] = await Promise.all([
     getRequestSettings(),
     catalogSummary(db, teacherId),
     listGenres(db, teacherId),
+    getAddingGenre(db, teacherId),
     isOwner ? listActivePairings(db, teacherId) : [],
     isOwner ? latestScanEventSeq(db, teacherId) : 0,
   ]);
@@ -46,6 +47,7 @@ export default async function AddBooksPage() {
       <AddBooks
         readingLevelSystem={settings.readingLevelSystem}
         suggestions={{ tags: summary.tags, locations: summary.locations, genres }}
+        addingGenreId={addingGenreId}
         pairedPhones={pairedPhones.map((phone) => ({
           pairingId: phone.pairingId,
           deviceLabel: phone.deviceLabel,

@@ -44,6 +44,41 @@ test("a teacher adds a genre, gives a book that genre, and filters the library b
   });
 });
 
+test("a teacher catalogues a genre shelf, and every book added takes that genre", async ({ page }) => {
+  await signUp(page, "Ines Duarte");
+  await page.goto("/library/add");
+
+  await test.step("choose the genre for new books", async () => {
+    await page.getByRole("button", { name: /Genre for new books/ }).click();
+    await page.getByRole("option", { name: "Fantasy" }).click();
+    await expect(page.getByRole("button", { name: /Genre for new books/ })).toContainText("Fantasy");
+  });
+
+  await test.step("a looked-up book starts in it", async () => {
+    const field = page.getByRole("textbox", { name: "ISBN" });
+    await field.fill("9780439708180");
+    await field.press("Enter");
+    await expect(page.getByText("Found", { exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("button", { name: /^Genre\b/ }).filter({ hasNotText: "for new books" }).last()).toContainText("Fantasy");
+    await page.getByRole("button", { name: "Add to library" }).click();
+    await expect(snackbar(page, /Added Harry Potter/)).toBeVisible();
+  });
+
+  await test.step("it's remembered, and a rapid scan takes it too", async () => {
+    await page.reload();
+    await expect(page.getByRole("button", { name: /Genre for new books/ })).toContainText("Fantasy");
+    await rapidAdd(page, ["9780545010221"]);
+  });
+
+  await test.step("both are in that genre in the library", async () => {
+    await page.goto("/library");
+    await page.getByRole("button", { name: "Fantasy" }).click();
+    await expect(page).toHaveURL(/genre=/);
+    await expect(page.getByRole("link", { name: /Sorcerer's Stone/ })).toHaveCount(1);
+    await expect(page.getByRole("link", { name: /Deathly Hallows/ })).toHaveCount(1);
+  });
+});
+
 /** Ticks a checkbox from the keyboard, as someone tabbing through the library would. */
 async function tick(checkbox: Locator) {
   await checkbox.focus();
