@@ -61,7 +61,24 @@ const BOOKS: SeedBook[] = [
   ["9780064404990", "The Lion, the Witch and the Wardrobe", ["C. S. Lewis"], 1950, 206, "T", ["fantasy", "series", "classic"], 2],
   ["9780439120425", "Esperanza Rising", ["Pam Muñoz Ryan"], 2000, 262, "V", ["historical fiction"], 1],
   ["9780544107717", "The Crossover", ["Kwame Alexander"], 2014, 237, "U", ["sports", "poetry"], 2],
+  [null, "Harry Potter and the Chamber of Secrets", ["J. K. Rowling"], 1999, 341, "V", ["fantasy", "series"], 1],
+  [null, "The Maze of Bones", ["Rick Riordan"], 2008, 220, "T", ["mystery", "series"], 2],
+  [null, "One False Note", ["Gordon Korman"], 2008, 164, "T", ["mystery", "series"], 1],
+  [null, "The Sword Thief", ["Peter Lerangis"], 2009, 158, "T", ["mystery", "series"], 1],
+  [null, "Prince Caspian", ["C. S. Lewis"], 1951, 223, "T", ["fantasy", "series", "classic"], 1],
 ];
+
+/** Series for the demo, so the library shows stacks; The 39 Clues has a different author per book. */
+const SERIES: Record<string, [series: string, number: number]> = {
+  "Harry Potter and the Sorcerer's Stone": ["Harry Potter", 1],
+  "Harry Potter and the Chamber of Secrets": ["Harry Potter", 2],
+  "The Maze of Bones": ["The 39 Clues", 1],
+  "One False Note": ["The 39 Clues", 2],
+  "The Sword Thief": ["The 39 Clues", 3],
+  "The Lion, the Witch and the Wardrobe": ["The Chronicles of Narnia", 2],
+  "Prince Caspian": ["The Chronicles of Narnia", 4],
+  "Ramona Quimby, Age 8": ["Ramona", 6],
+};
 
 const BINS = ["Bin A", "Bin B", "Bin C", "Top shelf", "Reading nook"];
 
@@ -157,6 +174,8 @@ async function main() {
         notes: null,
         metadataSource: "manual",
         genreId: genreFor(tags),
+        series: SERIES[title]?.[0] ?? null,
+        seriesNumber: SERIES[title]?.[1] ?? null,
       },
       copyCount,
     );
