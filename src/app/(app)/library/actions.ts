@@ -92,6 +92,8 @@ const bookDetails = z.object({
   notes: optionalText(2000),
   metadataSource: z.enum(metadataSources),
   genreId: z.uuid().nullable().optional(),
+  series: optionalText(120).optional(),
+  seriesNumber: z.number().min(0, "A book number can't be negative.").max(9999).nullable().optional(),
 });
 
 const id = z.uuid();

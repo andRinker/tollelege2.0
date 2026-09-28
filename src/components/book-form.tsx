@@ -13,6 +13,7 @@ import { ComboBox } from "@/ui/components/select";
 import { TextField } from "@/ui/components/text-field";
 import { iconAdd, iconLabel, iconRemove, iconShelves } from "@/ui/icons/generated";
 import { READING_LEVEL_FIELD_LABELS } from "@/lib/reading-levels";
+import { formatSeriesNumber } from "@/lib/series";
 
 export type BookFormValue = {
   isbn: string;
@@ -30,6 +31,8 @@ export type BookFormValue = {
   coverUrl: string | null;
   metadataSource: MetadataSource;
   genreId: string | null;
+  series: string;
+  seriesNumber: string;
 };
 
 export const EMPTY_BOOK: BookFormValue = {
@@ -48,6 +51,8 @@ export const EMPTY_BOOK: BookFormValue = {
   coverUrl: null,
   metadataSource: "manual",
   genreId: null,
+  series: "",
+  seriesNumber: "",
 };
 
 export function bookFormFromMetadata(metadata: BookMetadata): BookFormValue {
@@ -63,6 +68,8 @@ export function bookFormFromMetadata(metadata: BookMetadata): BookFormValue {
     description: metadata.description ?? "",
     coverUrl: metadata.coverUrl,
     metadataSource: metadata.source,
+    series: metadata.series ?? "",
+    seriesNumber: formatSeriesNumber(metadata.seriesNumber),
   };
 }
 
@@ -82,6 +89,8 @@ export function bookFormFromBook(book: {
   coverUrl: string | null;
   metadataSource: MetadataSource;
   genreId?: string | null;
+  series?: string | null;
+  seriesNumber?: number | null;
 }): BookFormValue {
   return {
     isbn: book.isbn13 ?? "",
@@ -99,8 +108,15 @@ export function bookFormFromBook(book: {
     coverUrl: book.coverUrl,
     metadataSource: book.metadataSource,
     genreId: book.genreId ?? null,
+    series: book.series ?? "",
+    seriesNumber: formatSeriesNumber(book.seriesNumber),
   };
 }
+
+const toNumber = (value: string) => {
+  const number = Number.parseFloat(value);
+  return Number.isFinite(number) ? number : null;
+};
 
 const toInt = (value: string) => {
   const number = Number.parseInt(value, 10);
@@ -127,10 +143,12 @@ export function bookInputFromForm(value: BookFormValue): BookDetailsInput {
     notes: value.notes.trim() || null,
     metadataSource: value.metadataSource,
     genreId: value.genreId,
+    series: value.series.replace(/\s+/g, " ").trim() || null,
+    seriesNumber: value.series.trim() && value.seriesNumber.trim() ? toNumber(value.seriesNumber) : null,
   };
 }
 
-type Suggestions = { tags: string[]; locations: string[]; genres?: GenreOption[] };
+type Suggestions = { tags: string[]; locations: string[]; genres?: GenreOption[]; series?: string[] };
 
 type FieldProps = {
   value: BookFormValue;
@@ -214,6 +232,25 @@ export function ShelvingFields({ value, onChange, readingLevelSystem, suggestion
         >
           {(item: { id: string; name: string }) => <ListBoxItem id={item.id}>{item.name}</ListBoxItem>}
         </ComboBox>
+      </div>
+      <div className="grid grid-cols-[minmax(0,1fr)_6rem] gap-4">
+        <ComboBox
+          label="Series"
+          allowsCustomValue
+          inputValue={value.series}
+          onInputChange={(series) => onChange({ ...value, series })}
+          defaultItems={(suggestions.series ?? []).map((series) => ({ id: series, name: series }))}
+          menuTrigger="focus"
+        >
+          {(item: { id: string; name: string }) => <ListBoxItem id={item.id}>{item.name}</ListBoxItem>}
+        </ComboBox>
+        <TextField
+          label="Book no."
+          value={value.seriesNumber}
+          onChange={(seriesNumber) => onChange({ ...value, seriesNumber: seriesNumber.replace(/[^\d.]/g, "").slice(0, 7) })}
+          inputMode="decimal"
+          isDisabled={!value.series.trim()}
+        />
       </div>
       <TagEditor tags={value.tags} onChange={(tags) => onChange({ ...value, tags })} suggestions={suggestions.tags} />
     </div>

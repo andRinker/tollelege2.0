@@ -55,7 +55,7 @@ import { type PairedPhone, PhonePairing } from "./phone-pairing";
 import { type GapFill, ShelfScanDialog } from "./shelf-scan";
 import { type ScanFeedEvent, useScanFeed } from "./use-scan-feed";
 
-type Suggestions = { tags: string[]; locations: string[]; genres?: GenreOption[] };
+type Suggestions = { tags: string[]; locations: string[]; genres?: GenreOption[]; series?: string[] };
 
 type LookupState = { status: "idle" } | { status: "loading"; isbn13: string } | Exclude<LookupActionResult, { status: "invalid" }>;
 

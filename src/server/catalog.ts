@@ -26,6 +26,9 @@ export type BookDetailsInput = {
   metadataSource: MetadataSource;
   /** The teacher's own genre, or null for none. Left out, a book's genre is left alone. */
   genreId?: string | null;
+  /** Left out, a book's series is left alone. */
+  series?: string | null;
+  seriesNumber?: number | null;
 };
 
 export const MAX_TAGS = 12;
@@ -170,6 +173,8 @@ export function bookInputFromMetadata(metadata: BookMetadata): BookDetailsInput 
     publisher: metadata.publisher,
     publishedYear: metadata.publishedYear,
     pageCount: metadata.pageCount,
+    series: metadata.series ?? null,
+    seriesNumber: metadata.seriesNumber ?? null,
     readingLevel: null,
     tags: [],
     location: null,
@@ -420,7 +425,7 @@ export async function listBooks(db: Database, teacherId: string, filters: BookLi
 }
 
 export async function catalogSummary(db: Database, teacherId: string) {
-  const [[titles], [copyTotals], tagRows, levelRows, locationRows] = await Promise.all([
+  const [[titles], [copyTotals], tagRows, levelRows, locationRows, seriesRows] = await Promise.all([
     db.select({ count: count() }).from(books).where(eq(books.teacherId, teacherId)),
     db
       .select({ count: count() })
@@ -441,6 +446,11 @@ export async function catalogSummary(db: Database, teacherId: string) {
       .from(books)
       .where(and(eq(books.teacherId, teacherId), isNotNull(books.location)))
       .orderBy(books.location),
+    db
+      .selectDistinct({ value: books.series })
+      .from(books)
+      .where(and(eq(books.teacherId, teacherId), isNotNull(books.series)))
+      .orderBy(books.series),
   ]);
   return {
     titles: titles.count,
@@ -448,6 +458,7 @@ export async function catalogSummary(db: Database, teacherId: string) {
     tags: tagRows.map((row) => row.tag),
     readingLevels: levelRows.map((row) => row.value as string),
     locations: locationRows.map((row) => row.value as string),
+    series: seriesRows.map((row) => row.value as string),
   };
 }
 

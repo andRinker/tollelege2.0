@@ -103,7 +103,7 @@ export default async function LibraryPage({ searchParams }: PageProps<"/library"
               view={view}
               total={result.total}
               readingLevelSystem={settings.readingLevelSystem}
-              suggestions={{ tags: summary.tags, locations: summary.locations, genres }}
+              suggestions={{ tags: summary.tags, locations: summary.locations, genres, series: summary.series }}
               genres={genres}
               canManage={isOwner}
             />

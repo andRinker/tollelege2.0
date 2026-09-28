@@ -79,7 +79,7 @@ export default async function BookPage({ params }: PageProps<"/library/[bookId]"
           <BookActions
             book={book}
             readingLevelSystem={settings.readingLevelSystem}
-            suggestions={{ tags: summary.tags, locations: summary.locations, genres }}
+            suggestions={{ tags: summary.tags, locations: summary.locations, genres, series: summary.series }}
             canDelete={isOwner}
           />
         }

@@ -212,6 +212,8 @@ export async function approveShelfLoan(
         pageCount: books.pageCount,
         readingLevel: books.readingLevel,
         tags: books.tags,
+        series: books.series,
+        seriesNumber: books.seriesNumber,
         metadataSource: books.metadataSource,
         lendable: books.lendable,
       })
@@ -262,6 +264,8 @@ export async function approveShelfLoan(
           pageCount: book.pageCount,
           readingLevel: book.readingLevel,
           tags: book.tags,
+          series: book.series,
+          seriesNumber: book.seriesNumber,
           metadataSource: book.metadataSource,
           // A borrowed book is never offered on to a third teacher.
           lendable: false,

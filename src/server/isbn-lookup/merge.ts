@@ -73,6 +73,9 @@ export function mergeMetadata(
     publisher: edition.publisher ?? naming.publisher,
     publishedYear: edition.publishedYear ?? naming.publishedYear,
     pageCount: edition.pageCount ?? naming.pageCount,
+    // Only library catalogues record series, so this is Open Library's or nothing.
+    series: openLibrary?.series ?? null,
+    seriesNumber: openLibrary?.series ? (openLibrary.seriesNumber ?? null) : null,
     // Records which source named the book, since that is the one a teacher would recognise.
     source: naming.source,
   };

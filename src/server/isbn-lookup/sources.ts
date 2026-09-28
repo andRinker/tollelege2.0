@@ -1,4 +1,5 @@
 import { APP_NAME } from "@/lib/brand";
+import { parseSeries } from "@/lib/series";
 import type { CachedBookMetadata } from "@/db/schema/isbn-cache";
 
 export type BookMetadata = CachedBookMetadata;
@@ -57,6 +58,8 @@ type OpenLibraryEdition = {
   number_of_pages?: number;
   covers?: number[];
   description?: string | { value: string };
+  /** Catalogue series statements, such as "The 39 clues ; bk. 1". */
+  series?: string[];
 };
 
 type OpenLibrarySearch = {
@@ -91,6 +94,7 @@ export async function fetchOpenLibrary(isbn13: string, fetchFn: Fetch = fetch): 
   }
 
   const coverId = edition?.covers?.find((id) => id > 0) ?? doc?.cover_i;
+  const series = (edition?.series ?? []).map((statement) => parseSeries(statement)).find(Boolean) ?? null;
   return {
     isbn13,
     title,
@@ -102,6 +106,8 @@ export async function fetchOpenLibrary(isbn13: string, fetchFn: Fetch = fetch): 
     // Edition dates are more reliable than the work's "first published" year.
     publishedYear: year(edition?.publish_date) ?? year(doc?.first_publish_year),
     pageCount: positiveInt(edition?.number_of_pages) ?? positiveInt(doc?.number_of_pages_median),
+    series: series?.name ?? null,
+    seriesNumber: series?.number ?? null,
     source: "openlibrary",
   };
 }

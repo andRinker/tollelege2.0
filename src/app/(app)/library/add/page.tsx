@@ -46,7 +46,7 @@ export default async function AddBooksPage() {
       />
       <AddBooks
         readingLevelSystem={settings.readingLevelSystem}
-        suggestions={{ tags: summary.tags, locations: summary.locations, genres }}
+        suggestions={{ tags: summary.tags, locations: summary.locations, genres, series: summary.series }}
         addingGenreId={addingGenreId}
         pairedPhones={pairedPhones.map((phone) => ({
           pairingId: phone.pairingId,
