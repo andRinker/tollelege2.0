@@ -8,6 +8,7 @@ import { getDb } from "@/db/client";
 import type { CopyStatus } from "@/db/schema/enums";
 import { describeDueDate, formatInstant, isOverdue, todayInTimeZone } from "@/lib/dates";
 import { formatIsbn13 } from "@/lib/isbn";
+import { formatSeriesNumber } from "@/lib/series";
 import { READING_LEVEL_FIELD_LABELS } from "@/lib/reading-levels";
 import { GenreLabel } from "@/components/genre";
 import { catalogSummary, getBookDetail } from "@/server/catalog";
@@ -20,7 +21,7 @@ import { cx } from "@/ui/cx";
 import { LinkButton } from "@/ui/components/button";
 import { Avatar, PageHeader, Shape } from "@/ui/components/expressive";
 import { List, ListItem } from "@/ui/components/list";
-import { iconArrowBack } from "@/ui/icons/generated";
+import { iconArrowBack, iconLibraryBooks } from "@/ui/icons/generated";
 import { Card } from "@/ui/components/surfaces";
 import { AddCopyButton, BookActions, CopyMenu, LendableSwitch } from "./book-actions";
 
@@ -79,7 +80,7 @@ export default async function BookPage({ params }: PageProps<"/library/[bookId]"
           <BookActions
             book={book}
             readingLevelSystem={settings.readingLevelSystem}
-            suggestions={{ tags: summary.tags, locations: summary.locations, genres }}
+            suggestions={{ tags: summary.tags, locations: summary.locations, genres, series: summary.series }}
             canDelete={isOwner}
           />
         }
@@ -101,7 +102,7 @@ export default async function BookPage({ params }: PageProps<"/library/[bookId]"
         </aside>
 
         <div className="flex min-w-0 flex-col gap-6">
-          {(facts.length > 0 || genre || book.tags.length > 0 || book.description || book.notes) && (
+          {(facts.length > 0 || genre || book.series || book.tags.length > 0 || book.description || book.notes) && (
             <section className="flex flex-col gap-4 rounded-xl bg-surface-container-low p-5 medium:p-6">
               {facts.length > 0 && (
                 <dl className="grid grid-cols-2 gap-x-6 gap-y-3 medium:grid-cols-3">
@@ -112,6 +113,18 @@ export default async function BookPage({ params }: PageProps<"/library/[bookId]"
                     </div>
                   ))}
                 </dl>
+              )}
+              {book.series && (
+                <LinkButton
+                  href={`/library?series=${encodeURIComponent(book.series)}`}
+                  variant="tonal"
+                  size="xs"
+                  icon={iconLibraryBooks}
+                  className="self-start"
+                  aria-label={`${book.series}${book.seriesNumber !== null ? `, book ${formatSeriesNumber(book.seriesNumber)}` : ""}. See the whole series`}
+                >
+                  {book.seriesNumber !== null ? `${book.series} · Book ${formatSeriesNumber(book.seriesNumber)}` : book.series}
+                </LinkButton>
               )}
               {genre && book.genreId && (
                 <LinkButton

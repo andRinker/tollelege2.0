@@ -2,6 +2,7 @@ import { and, asc, count, desc, eq, ilike, inArray, isNotNull, isNull, max, or, 
 import type { Database } from "@/db/client";
 import { books, type CopyStatus, copies, type GenreColor, genres, loans, type MetadataSource, students } from "@/db/schema";
 import { normalizeIsbn } from "@/lib/isbn";
+import { type ParsedSeries, parseSeries, seriesKey } from "@/lib/series";
 import { renumberCopies } from "./copy-numbers";
 import { inScope } from "./coteaching";
 import { assertGenreOwned } from "./genres";
@@ -26,6 +27,9 @@ export type BookDetailsInput = {
   metadataSource: MetadataSource;
   /** The teacher's own genre, or null for none. Left out, a book's genre is left alone. */
   genreId?: string | null;
+  /** Left out, a book's series is left alone. */
+  series?: string | null;
+  seriesNumber?: number | null;
 };
 
 export const MAX_TAGS = 12;
@@ -170,6 +174,8 @@ export function bookInputFromMetadata(metadata: BookMetadata): BookDetailsInput 
     publisher: metadata.publisher,
     publishedYear: metadata.publishedYear,
     pageCount: metadata.pageCount,
+    series: metadata.series ?? null,
+    seriesNumber: metadata.seriesNumber ?? null,
     readingLevel: null,
     tags: [],
     location: null,
@@ -300,6 +306,10 @@ export type BookListFilters = {
   location?: string;
   /** A genre id, or "none" for books without one. */
   genre?: string;
+  /** One series, by name, however its books spell it. Its books come in series order. */
+  series?: string;
+  /** Only these books. Internal: the grouped library reads one page of books this way. */
+  ids?: string[];
   sort?: BookSort;
   page?: number;
   pageSize?: number;
@@ -316,6 +326,8 @@ export type BookListItem = {
   tags: string[];
   location: string | null;
   genre: { name: string; color: GenreColor } | null;
+  series: string | null;
+  seriesNumber: number | null;
   /** Offered to connected teachers; the list marks the titles held back. */
   lendable: boolean;
   totalCopies: number;
@@ -324,6 +336,9 @@ export type BookListItem = {
 
 // Titles sort without a leading "The", "A", or "An", as libraries shelve them.
 const sortableTitle = sql`regexp_replace(lower(${books.title}), '^(the|a|an)\\s+', '')`;
+
+// `seriesKey` from src/lib/series.ts, in SQL, so a series is one series however it's spelled.
+const seriesKeySql = sql`regexp_replace(btrim(regexp_replace(regexp_replace(lower(${books.series}), '[’'']', '', 'g'), '[^a-z0-9]+', ' ', 'g')), '^(the|a|an) ', '')`;
 
 /**
  * What the library's filters select, shared by the page of books and by "select all matching",
@@ -364,6 +379,8 @@ function libraryQuery(db: Database, teacherId: string, filters: BookListFilters)
   if (filters.location) conditions.push(eq(books.location, filters.location));
   if (filters.genre === "none") conditions.push(isNull(books.genreId));
   else if (filters.genre && /^[0-9a-f-]{36}$/i.test(filters.genre)) conditions.push(eq(books.genreId, filters.genre));
+  if (filters.ids) conditions.push(inArray(books.id, filters.ids.length ? filters.ids : ["00000000-0000-0000-0000-000000000000"]));
+  if (filters.series?.trim()) conditions.push(sql`${seriesKeySql} = ${seriesKey(filters.series)}`);
   if (filters.availability === "available") conditions.push(sql`coalesce(${copyCounts.available}, 0) > 0`);
   if (filters.availability === "out") conditions.push(sql`coalesce(${copyCounts.total}, 0) > coalesce(${copyCounts.available}, 0)`);
 
@@ -376,8 +393,9 @@ export async function listBooks(db: Database, teacherId: string, filters: BookLi
   const page = Math.max(filters.page ?? 1, 1);
 
   const { copyCounts, where } = libraryQuery(db, teacherId, filters);
-  const orderBy =
-    filters.sort === "recent"
+  const orderBy = filters.series?.trim()
+    ? [sql`${books.seriesNumber} asc nulls last`, asc(sortableTitle)]
+    : filters.sort === "recent"
       ? [desc(books.createdAt), asc(sortableTitle)]
       : filters.sort === "author"
         ? // By the first author's last name.
@@ -399,6 +417,8 @@ export async function listBooks(db: Database, teacherId: string, filters: BookLi
         location: books.location,
         genreName: genres.name,
         genreColor: genres.color,
+        series: books.series,
+        seriesNumber: books.seriesNumber,
         lendable: books.lendable,
         totalCopies: sql<number>`coalesce(${copyCounts.total}, 0)`.mapWith(Number),
         availableCopies: sql<number>`coalesce(${copyCounts.available}, 0)`.mapWith(Number),
@@ -419,8 +439,159 @@ export async function listBooks(db: Database, teacherId: string, filters: BookLi
   return { items, total, page, pageCount: Math.max(1, Math.ceil(total / pageSize)) };
 }
 
+/** A series shown as one stack: its first book stands for it. */
+export type SeriesStack = {
+  name: string;
+  /** How many of its books the filters matched. */
+  count: number;
+  bookIds: string[];
+  /** The lowest-numbered matching book, whose cover and author the stack shows. */
+  first: BookListItem;
+  totalCopies: number;
+  availableCopies: number;
+  /** The genre every matching book shares, or null when they differ or have none. */
+  genre: { name: string; color: GenreColor } | null;
+};
+
+export type LibraryEntry = { kind: "book"; book: BookListItem } | { kind: "series"; series: SeriesStack };
+
+const shelvedTitle = (title: string) => title.toLowerCase().replace(/^(the|a|an)\s+/, "");
+const leadSurname = (authors: string[]) => (authors[0] ?? "").toLowerCase().replace(/^.*\s/, "");
+
+/**
+ * The library page: like `listBooks`, but each series with two or more matching books is one
+ * stack, and pages count stacks. A stack sorts by its series name, or by the lead author of
+ * its first book (The 39 Clues goes under Riordan, however many authors it had), or by its
+ * newest book. A search, or a single series, isn't grouped: those are looking for books.
+ *
+ * Grouping happens here rather than in SQL because a series is recognised by `seriesKey`,
+ * which forgives the differences between catalogues' spellings of it. Only the few columns
+ * grouping needs are read for every matching book; full rows are read for one page.
+ */
+export async function listLibrary(
+  db: Database,
+  teacherId: string,
+  filters: BookListFilters & { group?: boolean } = {},
+): Promise<{ entries: LibraryEntry[]; total: number; books: number; page: number; pageCount: number }> {
+  if (!filters.group || filters.query?.trim() || filters.series?.trim()) {
+    const result = await listBooks(db, teacherId, filters);
+    return { ...result, entries: result.items.map((book) => ({ kind: "book", book })), books: result.total };
+  }
+
+  const pageSize = Math.min(Math.max(filters.pageSize ?? 48, 1), 200);
+  const { copyCounts, where } = libraryQuery(db, teacherId, filters);
+  const rows = await db
+    .select({
+      id: books.id,
+      title: books.title,
+      authors: books.authors,
+      series: books.series,
+      seriesNumber: books.seriesNumber,
+      createdAt: books.createdAt,
+    })
+    .from(books)
+    .leftJoin(copyCounts, eq(copyCounts.bookId, books.id))
+    .where(where);
+
+  const bySeries = new Map<string, typeof rows>();
+  const groups: (typeof rows)[] = [];
+  for (const row of rows) {
+    const key = row.series ? seriesKey(row.series) : "";
+    if (!key) {
+      groups.push([row]);
+      continue;
+    }
+    const group = bySeries.get(key);
+    if (group) group.push(row);
+    else {
+      const created = [row];
+      bySeries.set(key, created);
+      groups.push(created);
+    }
+  }
+  for (const group of groups) {
+    group.sort(
+      (a, b) =>
+        (a.seriesNumber ?? Number.POSITIVE_INFINITY) - (b.seriesNumber ?? Number.POSITIVE_INFINITY) ||
+        shelvedTitle(a.title).localeCompare(shelvedTitle(b.title)),
+    );
+  }
+
+  const nameOf = (group: typeof rows) => (group.length > 1 ? group[0].series! : group[0].title);
+  const newest = (group: typeof rows) => Math.max(...group.map((row) => row.createdAt.getTime()));
+  const byTitle = (a: typeof rows, b: typeof rows) => shelvedTitle(nameOf(a)).localeCompare(shelvedTitle(nameOf(b)));
+  groups.sort(
+    filters.sort === "recent"
+      ? (a, b) => newest(b) - newest(a) || byTitle(a, b)
+      : filters.sort === "author"
+        ? (a, b) => leadSurname(a[0].authors).localeCompare(leadSurname(b[0].authors)) || byTitle(a, b)
+        : byTitle,
+  );
+
+  const total = groups.length;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const page = Math.min(Math.max(filters.page ?? 1, 1), pageCount);
+  const shown = groups.slice((page - 1) * pageSize, page * pageSize);
+  const ids = shown.flatMap((group) => group.map((row) => row.id));
+  const full = ids.length
+    ? await listBooks(db, teacherId, { ...filters, ids, page: 1, pageSize: ids.length })
+    : { items: [] as BookListItem[] };
+  const byId = new Map(full.items.map((book) => [book.id, book]));
+
+  const entries: LibraryEntry[] = shown.flatMap((group): LibraryEntry[] => {
+    const items = group.map((row) => byId.get(row.id)).filter((book): book is BookListItem => Boolean(book));
+    if (items.length === 0) return [];
+    if (items.length === 1) return [{ kind: "book", book: items[0] }];
+    const [first] = items;
+    const sharedGenre = items.every((book) => book.genre && first.genre && book.genre.name === first.genre.name) ? first.genre : null;
+    return [
+      {
+        kind: "series",
+        series: {
+          name: first.series ?? group[0].series!,
+          count: items.length,
+          bookIds: items.map((book) => book.id),
+          first,
+          totalCopies: items.reduce((sum, book) => sum + book.totalCopies, 0),
+          availableCopies: items.reduce((sum, book) => sum + book.availableCopies, 0),
+          genre: sharedGenre,
+        },
+      },
+    ];
+  });
+  return { entries, total, books: rows.length, page, pageCount };
+}
+
+/**
+ * Gives a book a series it doesn't have yet, from a hint such as the series printed on its
+ * spine. A series the teacher (or a catalogue) already set is never replaced. Printed series
+ * are often in capitals, so they're tidied, and one the library already knows by another
+ * spelling takes that spelling, so a shelf photo can't split a series in two.
+ */
+export async function fillSeries(db: Database, teacherId: string, bookId: string, hint: string | null | undefined): Promise<void> {
+  const raw = hint?.replace(/\s+/g, " ").trim();
+  if (!raw) return;
+  const parsed = parseSeries(raw === raw.toUpperCase() ? raw.toLowerCase() : raw);
+  if (parsed) await setSeriesIfMissing(db, teacherId, bookId, parsed);
+}
+
+/** Sets a book's series only if it has none, in the library's own spelling of it. True if it was set. */
+export async function setSeriesIfMissing(db: Database, teacherId: string, bookId: string, series: ParsedSeries): Promise<boolean> {
+  const known = await db
+    .selectDistinct({ series: books.series })
+    .from(books)
+    .where(and(eq(books.teacherId, teacherId), isNotNull(books.series)));
+  const name = known.find((row) => seriesKey(row.series!) === seriesKey(series.name))?.series ?? series.name;
+  const updated = await db
+    .update(books)
+    .set({ series: name, seriesNumber: series.number })
+    .where(and(eq(books.id, bookId), eq(books.teacherId, teacherId), isNull(books.series)))
+    .returning({ id: books.id });
+  return updated.length > 0;
+}
+
 export async function catalogSummary(db: Database, teacherId: string) {
-  const [[titles], [copyTotals], tagRows, levelRows, locationRows] = await Promise.all([
+  const [[titles], [copyTotals], tagRows, levelRows, locationRows, seriesRows] = await Promise.all([
     db.select({ count: count() }).from(books).where(eq(books.teacherId, teacherId)),
     db
       .select({ count: count() })
@@ -441,6 +612,11 @@ export async function catalogSummary(db: Database, teacherId: string) {
       .from(books)
       .where(and(eq(books.teacherId, teacherId), isNotNull(books.location)))
       .orderBy(books.location),
+    db
+      .selectDistinct({ value: books.series })
+      .from(books)
+      .where(and(eq(books.teacherId, teacherId), isNotNull(books.series)))
+      .orderBy(books.series),
   ]);
   return {
     titles: titles.count,
@@ -448,6 +624,7 @@ export async function catalogSummary(db: Database, teacherId: string) {
     tags: tagRows.map((row) => row.tag),
     readingLevels: levelRows.map((row) => row.value as string),
     locations: locationRows.map((row) => row.value as string),
+    series: seriesRows.map((row) => row.value as string),
   };
 }
 

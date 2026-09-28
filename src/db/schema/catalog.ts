@@ -6,6 +6,7 @@ import {
   index,
   integer,
   pgTable,
+  real,
   text,
   timestamp,
   unique,
@@ -62,6 +63,10 @@ export const books = pgTable(
     notes: text("notes"),
     /** One genre per title, the teacher's own. Deleting the genre leaves the book with none. */
     genreId: uuid("genre_id"),
+    /** The series a title belongs to, as a teacher would name it: "The 39 Clues". */
+    series: text("series"),
+    /** Its place in the series. Real, since some series number their in-betweens 1.5. */
+    seriesNumber: real("series_number"),
     /** Offered to connected teachers. On by default; turn it off for class sets. */
     lendable: boolean("lendable").notNull().default(true),
     metadataSource: text("metadata_source", { enum: metadataSources })
@@ -79,6 +84,8 @@ export const books = pgTable(
       .on(t.teacherId, t.isbn13)
       .where(sql`${t.isbn13} is not null`),
     index("books_teacher_title_idx").on(t.teacherId, t.title),
+    index("books_teacher_series_idx").on(t.teacherId, sql`lower(${t.series})`),
+    check("books_series_number_range", sql`${t.seriesNumber} is null or ${t.seriesNumber} between 0 and 9999`),
     // ON DELETE SET NULL ("genre_id") in the migration, by hand: drizzle writes a plain
     // SET NULL, which would null "teacher_id" too and fail.
     foreignKey({

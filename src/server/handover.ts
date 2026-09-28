@@ -591,6 +591,8 @@ export async function acceptHandover(db: Database, toId: string, handoverId: str
               tags: book.tags,
               location: book.location,
               notes: book.notes,
+              series: book.series,
+              seriesNumber: book.seriesNumber,
               lendable: book.lendable,
               metadataSource: book.metadataSource,
               genreId: book.genreId ? (genreFor.get(book.genreId) ?? null) : null,

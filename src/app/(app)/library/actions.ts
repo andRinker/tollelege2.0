@@ -92,6 +92,8 @@ const bookDetails = z.object({
   notes: optionalText(2000),
   metadataSource: z.enum(metadataSources),
   genreId: z.uuid().nullable().optional(),
+  series: optionalText(120).optional(),
+  seriesNumber: z.number().min(0, "A book number can't be negative.").max(9999).nullable().optional(),
 });
 
 const id = z.uuid();
@@ -137,11 +139,12 @@ export async function addBookAction(input: BookDetailsInput, copyCount: number):
 
 export type QuickAddActionResult = QuickAddOutcome | { status: "error"; isbn13: string; message: string };
 
-export async function quickAddAction(raw: string): Promise<QuickAddActionResult> {
+export async function quickAddAction(raw: string, hints?: { series?: string | null }): Promise<QuickAddActionResult> {
   const classroom = await requireClassroom();
   const { teacherId } = classroom;
+  const series = z.string().max(200).nullish().safeParse(hints?.series);
   try {
-    const outcome = await addBookByScan(getDb(), teacherId, raw);
+    const outcome = await addBookByScan(getDb(), teacherId, raw, { series: series.success ? series.data : null });
     if (outcome.status === "added") revalidateLibrary();
     return outcome;
   } catch (error) {

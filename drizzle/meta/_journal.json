@@ -99,6 +99,13 @@
       "when": 1790603796515,
       "tag": "0013_adding_genre",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1790605294147,
+      "tag": "0014_series",
+      "breakpoints": true
     }
   ]
 }

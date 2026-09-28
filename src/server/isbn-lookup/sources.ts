@@ -1,4 +1,5 @@
 import { APP_NAME } from "@/lib/brand";
+import { type ParsedSeries, parseSeries } from "@/lib/series";
 import type { CachedBookMetadata } from "@/db/schema/isbn-cache";
 
 export type BookMetadata = CachedBookMetadata;
@@ -57,6 +58,8 @@ type OpenLibraryEdition = {
   number_of_pages?: number;
   covers?: number[];
   description?: string | { value: string };
+  /** Catalogue series statements, such as "The 39 clues ; bk. 1". */
+  series?: string[];
 };
 
 type OpenLibrarySearch = {
@@ -91,6 +94,7 @@ export async function fetchOpenLibrary(isbn13: string, fetchFn: Fetch = fetch): 
   }
 
   const coverId = edition?.covers?.find((id) => id > 0) ?? doc?.cover_i;
+  const series = (edition?.series ?? []).map((statement) => parseSeries(statement)).find(Boolean) ?? null;
   return {
     isbn13,
     title,
@@ -102,8 +106,20 @@ export async function fetchOpenLibrary(isbn13: string, fetchFn: Fetch = fetch): 
     // Edition dates are more reliable than the work's "first published" year.
     publishedYear: year(edition?.publish_date) ?? year(doc?.first_publish_year),
     pageCount: positiveInt(edition?.number_of_pages) ?? positiveInt(doc?.number_of_pages_median),
+    series: series?.name ?? null,
+    seriesNumber: series?.number ?? null,
     source: "openlibrary",
   };
+}
+
+/**
+ * Only the series from an edition record, for finding series for books catalogued before
+ * they were read. Null when the record has none; throws LookupUnavailableError when Open
+ * Library can't be reached, so a book isn't taken to have no series because of an outage.
+ */
+export async function fetchOpenLibrarySeries(isbn13: string, fetchFn: Fetch = fetch): Promise<ParsedSeries | null> {
+  const edition = (await getJson(fetchFn, `https://openlibrary.org/isbn/${isbn13}.json`)) as OpenLibraryEdition | null;
+  return (edition?.series ?? []).map((statement) => parseSeries(statement)).find(Boolean) ?? null;
 }
 
 type GoogleBooksResponse = {

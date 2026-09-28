@@ -8,7 +8,7 @@ import { BookCover } from "@/components/book-cover";
 import { GenreDot, GenreLabel, type GenreOption } from "@/components/genre";
 import type { ReadingLevelSystem } from "@/db/schema/enums";
 import { READING_LEVEL_FIELD_LABELS } from "@/lib/reading-levels";
-import type { BookListItem, BulkOutcome } from "@/server/catalog";
+import type { BookListItem, BulkOutcome, LibraryEntry, SeriesStack } from "@/server/catalog";
 import { cx } from "@/ui/cx";
 import { Button } from "@/ui/components/button";
 import { ConfirmDialog, Dialog } from "@/ui/components/dialog";
@@ -39,9 +39,10 @@ import {
 import type { BookSuggestions } from "./book-dialogs";
 import type { LibraryView } from "./filters";
 import { LibraryList } from "./library-list";
+import { StackCover } from "./stack-cover";
 
 type Props = {
-  books: BookListItem[];
+  entries: LibraryEntry[];
   view: LibraryView;
   /** Books the filters select across every page. */
   total: number;
@@ -69,7 +70,7 @@ function describeOutcome(verb: string, outcome: BulkOutcome): string {
  * lending on all of them, or deletes them. Each book keeps its own rules: one that's checked out
  * isn't deleted, and the bar says which were left.
  */
-export function LibraryBooks({ books, view, total, readingLevelSystem, suggestions, genres, canManage }: Props) {
+export function LibraryBooks({ entries, view, total, readingLevelSystem, suggestions, genres, canManage }: Props) {
   const showSnackbar = useSnackbar();
   const searchParams = useSearchParams();
   const [selecting, setSelecting] = useState(false);
@@ -78,7 +79,9 @@ export function LibraryBooks({ books, view, total, readingLevelSystem, suggestio
   const [dialog, setDialog] = useState<"bin" | "level" | "delete" | null>(null);
   const [text, setText] = useState("");
 
-  const onPage = books.map((book) => book.id);
+  // A stack stands for all of its books, so choosing it chooses every one.
+  const onPage = entries.flatMap((entry) => (entry.kind === "book" ? [entry.book.id] : entry.series.bookIds));
+  const seriesHref = useSeriesHref();
   const pageSelected = onPage.filter((id) => selected.has(id)).length;
 
   function stop() {
@@ -95,11 +98,13 @@ export function LibraryBooks({ books, view, total, readingLevelSystem, suggestio
     return () => window.removeEventListener("keydown", onKey);
   }, [selecting, dialog]);
 
-  function toggle(id: string, on: boolean) {
+  function toggle(ids: string[], on: boolean) {
     setSelected((current) => {
       const next = new Set(current);
-      if (on) next.add(id);
-      else next.delete(id);
+      for (const id of ids) {
+        if (on) next.add(id);
+        else next.delete(id);
+      }
       return next;
     });
   }
@@ -189,24 +194,54 @@ export function LibraryBooks({ books, view, total, readingLevelSystem, suggestio
               : "flex flex-col gap-1"
           }
         >
-          {books.map((book) => (
-            <li key={book.id}>
-              <SelectableBook book={book} layout={view} isSelected={selected.has(book.id)} onChange={(on) => toggle(book.id, on)} />
-            </li>
-          ))}
+          {entries.map((entry) =>
+            entry.kind === "book" ? (
+              <li key={entry.book.id}>
+                <SelectableBook
+                  book={entry.book}
+                  layout={view}
+                  isSelected={selected.has(entry.book.id)}
+                  onChange={(on) => toggle([entry.book.id], on)}
+                />
+              </li>
+            ) : (
+              <li key={`series-${entry.series.name}`}>
+                <SelectableStack
+                  stack={entry.series}
+                  layout={view}
+                  chosen={entry.series.bookIds.filter((id) => selected.has(id)).length}
+                  onChange={(on) => toggle(entry.series.bookIds, on)}
+                />
+              </li>
+            ),
+          )}
         </ul>
       ) : view === "list" ? (
-        <LibraryList books={books} readingLevelSystem={readingLevelSystem} suggestions={suggestions} canManage={canManage} />
+        <LibraryList entries={entries} seriesHref={seriesHref} readingLevelSystem={readingLevelSystem} suggestions={suggestions} canManage={canManage} />
       ) : (
         <ul className="grid grid-cols-2 gap-3 medium:grid-cols-3 expanded:grid-cols-4 large:grid-cols-5 xlarge:grid-cols-6">
-          {books.map((book) => (
-            <li key={book.id}>
-              <CardLink href={`/library/${book.id}`} variant="filled" className="flex h-full flex-col gap-2 bg-surface-container-low p-2 pb-3">
-                <BookCover title={book.title} coverUrl={book.coverUrl} />
-                <BookText book={book} />
-              </CardLink>
-            </li>
-          ))}
+          {entries.map((entry) =>
+            entry.kind === "book" ? (
+              <li key={entry.book.id}>
+                <CardLink href={`/library/${entry.book.id}`} variant="filled" className="flex h-full flex-col gap-2 bg-surface-container-low p-2 pb-3">
+                  <BookCover title={entry.book.title} coverUrl={entry.book.coverUrl} />
+                  <BookText book={entry.book} />
+                </CardLink>
+              </li>
+            ) : (
+              <li key={`series-${entry.series.name}`}>
+                <CardLink
+                  href={seriesHref(entry.series.name)}
+                  variant="filled"
+                  aria-label={`${entry.series.name}, ${plural(entry.series.count, "book")}`}
+                  className="flex h-full flex-col gap-2 bg-surface-container-low p-2 pb-3"
+                >
+                  <StackCover stack={entry.series} />
+                  <StackText stack={entry.series} />
+                </CardLink>
+              </li>
+            ),
+          )}
         </ul>
       )}
 
@@ -355,6 +390,74 @@ export function LibraryBooks({ books, view, total, readingLevelSystem, suggestio
         onConfirm={() => run(() => bulkDeleteBooksAction(ids), (outcome) => describeOutcome("Deleted", outcome))}
       />
     </>
+  );
+}
+
+/** Where a stack opens: the same library, showing only that series, with the filters kept. */
+export function useSeriesHref() {
+  const searchParams = useSearchParams();
+  return (name: string) => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("page");
+    next.delete("q");
+    next.set("series", name);
+    return `/library?${next.toString()}`;
+  };
+}
+
+/** A stack's series name, how many books, its first author, a shared genre and availability. */
+function StackText({ stack }: { stack: SeriesStack }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-0.5 px-1">
+      <span className="line-clamp-2 text-title-sm text-on-surface">{stack.name}</span>
+      <span className="text-body-sm text-primary">{plural(stack.count, "book")}</span>
+      {stack.first.authors.length > 0 && <span className="truncate text-body-sm text-on-surface-variant">{stack.first.authors[0]}</span>}
+      {stack.genre && <GenreLabel genre={stack.genre} className="text-label-md text-on-surface-variant" />}
+      <Availability available={stack.availableCopies} total={stack.totalCopies} className="pt-1" />
+    </div>
+  );
+}
+
+/** A stack as a checkbox: ticking it chooses every book in it. Part-chosen shows as a dash. */
+function SelectableStack({
+  stack,
+  layout,
+  chosen,
+  onChange,
+}: {
+  stack: SeriesStack;
+  layout: LibraryView;
+  chosen: number;
+  onChange: (selected: boolean) => void;
+}) {
+  const all = chosen === stack.count;
+  return (
+    <AriaCheckbox
+      isSelected={all}
+      isIndeterminate={chosen > 0 && !all}
+      onChange={onChange}
+      aria-label={`${stack.name}, ${plural(stack.count, "book")}`}
+      className={cx(
+        "group relative flex h-full cursor-pointer rounded-md bg-surface-container-low outline-none transition-colors",
+        "data-[selected]:bg-secondary-container data-[indeterminate]:bg-secondary-container/60 data-[focus-visible]:outline-3 data-[focus-visible]:outline-offset-2 data-[focus-visible]:outline-secondary",
+        layout === "grid" ? "flex-col gap-2 p-2 pb-3" : "items-center gap-3 px-3 py-2",
+      )}
+    >
+      <div className={layout === "grid" ? "relative" : "relative w-10 shrink-0"}>
+        <StackCover stack={stack} size={layout === "grid" ? undefined : "sm"} />
+      </div>
+      <StackText stack={stack} />
+      <span
+        aria-hidden="true"
+        className={cx(
+          "grid size-7 place-items-center rounded-full border-2",
+          layout === "grid" ? "absolute top-3 right-3" : "ml-auto shrink-0",
+          all ? "border-primary bg-primary text-on-primary" : chosen > 0 ? "border-primary bg-surface text-primary" : "border-outline bg-surface/80 text-transparent",
+        )}
+      >
+        {chosen > 0 && !all ? <span className="h-0.5 w-3 rounded-full bg-primary" /> : <Icon icon={iconCheck} size={18} />}
+      </span>
+    </AriaCheckbox>
   );
 }
 

@@ -11,6 +11,9 @@ export type CachedBookMetadata = {
   publisher: string | null;
   publishedYear: number | null;
   pageCount: number | null;
+  /** Open Library's series, when it has one. Absent from answers cached before series were read. */
+  series?: string | null;
+  seriesNumber?: number | null;
   source: "openlibrary" | "google_books";
 };
 

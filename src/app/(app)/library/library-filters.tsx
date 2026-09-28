@@ -5,12 +5,12 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { ConnectedButton, ConnectedButtonGroup } from "@/ui/components/button-group";
 import { FilterChip } from "@/ui/components/chip";
 import { IconButton } from "@/ui/components/icon-button";
-import { Menu, MenuItem, MenuTrigger } from "@/ui/components/menu";
+import { Menu, MenuDivider, MenuItem, MenuTrigger } from "@/ui/components/menu";
 import { LinearProgress } from "@/ui/components/progress";
 import { SearchField } from "@/ui/components/text-field";
 import { iconGridView, iconSort, iconViewList } from "@/ui/icons/generated";
 import { type GenreOption, GenreLabel } from "@/components/genre";
-import { LIBRARY_VIEW_COOKIE, type LibraryView } from "./filters";
+import { LIBRARY_GROUP_COOKIE, LIBRARY_VIEW_COOKIE, type LibraryView } from "./filters";
 
 type Props = {
   query: string;
@@ -21,6 +21,8 @@ type Props = {
   genre?: string;
   sort: string;
   view: LibraryView;
+  /** Whether each series shows as one stack. */
+  group: boolean;
   tags: string[];
   readingLevels: string[];
   locations: string[];
@@ -34,7 +36,7 @@ const SORTS = [
   { id: "recent", label: "Recently added" },
 ];
 
-export function LibraryFilters({ query, availability, tag, level, bin, genre, sort, view, tags, readingLevels, locations, genres }: Props) {
+export function LibraryFilters({ query, availability, tag, level, bin, genre, sort, view, group, tags, readingLevels, locations, genres }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -51,6 +53,11 @@ export function LibraryFilters({ query, availability, tag, level, bin, genre, so
     next.delete("page");
     const queryString = next.toString();
     startTransition(() => router.replace(queryString ? `${pathname}?${queryString}` : pathname, { scroll: false }));
+  }
+
+  function changeGroup(next: boolean) {
+    document.cookie = `${LIBRARY_GROUP_COOKIE}=${next ? "on" : "off"};path=/;max-age=31536000;samesite=lax`;
+    startTransition(() => router.refresh());
   }
 
   function changeView(next: LibraryView) {
@@ -78,16 +85,26 @@ export function LibraryFilters({ query, availability, tag, level, bin, genre, so
         />
         <MenuTrigger>
           <IconButton icon={iconSort} label="Sort" variant="tonal" size="md" />
+          {/* Multiple, so the sort and the series switch can both show a tick. */}
           <Menu
-            selectionMode="single"
-            selectedKeys={[sort]}
-            onAction={(key) => update({ sort: key === "title" ? undefined : String(key) })}
+            selectionMode="multiple"
+            selectedKeys={group ? [sort, "group"] : [sort]}
+            onAction={(key) => {
+              if (key === "group") changeGroup(!group);
+              else update({ sort: key === "title" ? undefined : String(key) });
+            }}
           >
-            {SORTS.map((option) => (
-              <MenuItem key={option.id} id={option.id}>
-                {option.label}
-              </MenuItem>
-            ))}
+            {[
+              ...SORTS.map((option) => (
+                <MenuItem key={option.id} id={option.id}>
+                  {option.label}
+                </MenuItem>
+              )),
+              <MenuDivider key="divider" />,
+              <MenuItem key="group" id="group">
+                Stack each series
+              </MenuItem>,
+            ]}
           </Menu>
         </MenuTrigger>
       </div>

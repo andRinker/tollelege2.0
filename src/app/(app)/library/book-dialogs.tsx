@@ -10,7 +10,7 @@ import { ConfirmDialog, Dialog } from "@/ui/components/dialog";
 import { useSnackbar } from "@/ui/components/snackbar";
 import { deleteBookAction, updateBookAction } from "./actions";
 
-export type BookSuggestions = { tags: string[]; locations: string[]; genres?: GenreOption[] };
+export type BookSuggestions = { tags: string[]; locations: string[]; genres?: GenreOption[]; series?: string[] };
 
 /**
  * Editing a book's details, shared by the book's own page and the library list so the two
