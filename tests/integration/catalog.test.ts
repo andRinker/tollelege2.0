@@ -18,6 +18,7 @@ import {
   getBookDetail,
   listBookIdentities,
   listBooks,
+  listLibrary,
   normalizeTags,
   quickAddByIsbn,
   setCopyStatus,
@@ -335,5 +336,63 @@ describe("catalog", () => {
     const theirs = await listBooks(db, otherTeacher, { query: "Private" });
     expect(theirs.total).toBe(0);
     expect((await getBookDetail(db, teacher, bookId)).book.title).toBe("Private book");
+  });
+
+  describe("series stacks", () => {
+    it("shows a series as one stack, sorted and paged as one entry, and a search as books", async () => {
+      const t = await createTeacher(db);
+      const add = (title: string, authors: string[], series: string | null = null, seriesNumber: number | null = null) =>
+        createBook(db, t, bookInput({ title, authors, series, seriesNumber }));
+      // Book 1 is Riordan's; later books have other authors, and one catalogue drops "The".
+      await add("The Black Circle", ["Patrick Carman"], "The 39 Clues", 5);
+      await add("The Maze of Bones", ["Rick Riordan"], "The 39 Clues", 1);
+      await add("One False Note", ["Gordon Korman"], "39 clues", 2);
+      await add("Frindle", ["Andrew Clements"]);
+      await add("Holes", ["Louis Sachar"]);
+      await add("Dog Man", ["Dav Pilkey"], "Dog Man", 1);
+
+      const byTitle = await listLibrary(db, t, { group: true });
+      expect(byTitle.total).toBe(4);
+      expect(byTitle.books).toBe(6);
+      expect(byTitle.entries.map((entry) => (entry.kind === "series" ? `[${entry.series.name}]` : entry.book.title))).toEqual([
+        "[The 39 Clues]",
+        "Dog Man",
+        "Frindle",
+        "Holes",
+      ]);
+      const [stack] = byTitle.entries;
+      if (stack.kind !== "series") throw new Error("expected a stack");
+      expect(stack.series).toMatchObject({ count: 3, totalCopies: 3, availableCopies: 3 });
+      expect(stack.series.first.title).toBe("The Maze of Bones");
+
+      // By author, the stack goes under its first book's author, Riordan: after Pilkey and Sachar.
+      const byAuthor = await listLibrary(db, t, { group: true, sort: "author" });
+      expect(byAuthor.entries.map((entry) => (entry.kind === "series" ? entry.series.name : entry.book.title))).toEqual([
+        "Frindle",
+        "Dog Man",
+        "The 39 Clues",
+        "Holes",
+      ]);
+
+      // Pages count stacks, not books.
+      const paged = await listLibrary(db, t, { group: true, pageSize: 2, page: 2 });
+      expect(paged).toMatchObject({ total: 4, page: 2, pageCount: 2 });
+      expect(paged.entries.map((entry) => (entry.kind === "book" ? entry.book.title : entry.series.name))).toEqual(["Frindle", "Holes"]);
+
+      // A search finds the book itself, not its stack.
+      const searched = await listLibrary(db, t, { group: true, query: "maze" });
+      expect(searched.entries).toEqual([expect.objectContaining({ kind: "book" })]);
+
+      // Opening the stack lists its books in series order, however each spelled the series.
+      const opened = await listBooks(db, t, { series: "the 39 CLUES" });
+      expect(opened.items.map((book) => book.title)).toEqual(["The Maze of Bones", "One False Note", "The Black Circle"]);
+      expect(await listBookIds(db, t, { series: "39 Clues" })).toHaveLength(3);
+
+      // Filters apply to books before grouping: a stack of one is just that book.
+      const [one] = (await listBooks(db, t, { series: "The 39 Clues" })).items;
+      await updateBookDetails(db, t, one.id, { readingLevel: "T" });
+      const filtered = await listLibrary(db, t, { group: true, readingLevel: "T" });
+      expect(filtered.entries).toEqual([{ kind: "book", book: expect.objectContaining({ title: "The Maze of Bones" }) }]);
+    });
   });
 });
