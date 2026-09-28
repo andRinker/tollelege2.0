@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, ilike, isNotNull, isNull, max, or, type SQL, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, inArray, isNotNull, isNull, max, or, type SQL, sql } from "drizzle-orm";
 import type { Database } from "@/db/client";
 import { books, type CopyStatus, copies, type GenreColor, genres, loans, type MetadataSource, students } from "@/db/schema";
 import { normalizeIsbn } from "@/lib/isbn";
@@ -325,10 +325,11 @@ export type BookListItem = {
 // Titles sort without a leading "The", "A", or "An", as libraries shelve them.
 const sortableTitle = sql`regexp_replace(lower(${books.title}), '^(the|a|an)\\s+', '')`;
 
-export async function listBooks(db: Database, teacherId: string, filters: BookListFilters = {}) {
-  const pageSize = Math.min(Math.max(filters.pageSize ?? 48, 1), 200);
-  const page = Math.max(filters.page ?? 1, 1);
-
+/**
+ * What the library's filters select, shared by the page of books and by "select all matching",
+ * so a bulk action can never reach a book the teacher couldn't see in the list.
+ */
+function libraryQuery(db: Database, teacherId: string, filters: BookListFilters) {
   const copyCounts = db
     .select({
       bookId: copies.bookId,
@@ -367,6 +368,14 @@ export async function listBooks(db: Database, teacherId: string, filters: BookLi
   if (filters.availability === "out") conditions.push(sql`coalesce(${copyCounts.total}, 0) > coalesce(${copyCounts.available}, 0)`);
 
   const where = and(...conditions);
+  return { copyCounts, where };
+}
+
+export async function listBooks(db: Database, teacherId: string, filters: BookListFilters = {}) {
+  const pageSize = Math.min(Math.max(filters.pageSize ?? 48, 1), 200);
+  const page = Math.max(filters.page ?? 1, 1);
+
+  const { copyCounts, where } = libraryQuery(db, teacherId, filters);
   const orderBy =
     filters.sort === "recent"
       ? [desc(books.createdAt), asc(sortableTitle)]
@@ -546,4 +555,79 @@ export async function listBookIdentities(db: Database, teacherId: string): Promi
     .leftJoin(copies, and(eq(copies.bookId, books.id), eq(copies.status, "in_circulation")))
     .where(eq(books.teacherId, teacherId))
     .groupBy(books.id);
+}
+
+/** The most books one bulk action will touch: a whole classroom library, with room to spare. */
+export const MAX_BULK_BOOKS = 1000;
+
+/** The ids of every book the library's filters select, for "select all matching". */
+export async function listBookIds(db: Database, teacherId: string, filters: BookListFilters): Promise<string[]> {
+  const { copyCounts, where } = libraryQuery(db, teacherId, filters);
+  const rows = await db
+    .select({ id: books.id })
+    .from(books)
+    .leftJoin(copyCounts, eq(copyCounts.bookId, books.id))
+    .where(where)
+    .limit(MAX_BULK_BOOKS);
+  return rows.map((row) => row.id);
+}
+
+export type BulkBookPatch = { genreId?: string | null; location?: string | null; readingLevel?: string | null };
+
+/**
+ * Sets the same shelving detail on many books in one statement. Only the teacher's own books
+ * are touched, however the ids were chosen, and a genre must be theirs too.
+ */
+export async function bulkUpdateBooks(db: Database, teacherId: string, bookIds: string[], patch: BulkBookPatch): Promise<number> {
+  const ids = [...new Set(bookIds)].slice(0, MAX_BULK_BOOKS);
+  if (ids.length === 0 || Object.keys(patch).length === 0) return 0;
+  if (patch.genreId !== undefined) await assertGenreOwned(db, teacherId, patch.genreId);
+  const updated = await db
+    .update(books)
+    .set(patch)
+    .where(and(eq(books.teacherId, teacherId), inArray(books.id, ids)))
+    .returning({ id: books.id });
+  return updated.length;
+}
+
+/** What a bulk action did, and each book it left alone with the reason, as a teacher reads it. */
+export type BulkOutcome = { done: number; skipped: { title: string; reason: string }[] };
+
+/**
+ * Runs a per-book action over many books, so every rule that guards one book (checked out, away
+ * on loan to another teacher) guards each of them. A book that refuses is reported, not fatal.
+ */
+async function eachBook(
+  db: Database,
+  teacherId: string,
+  bookIds: string[],
+  action: (bookId: string) => Promise<void>,
+): Promise<BulkOutcome> {
+  const ids = [...new Set(bookIds)].slice(0, MAX_BULK_BOOKS);
+  if (ids.length === 0) return { done: 0, skipped: [] };
+  const titles = new Map(
+    (await db.select({ id: books.id, title: books.title }).from(books).where(and(eq(books.teacherId, teacherId), inArray(books.id, ids)))).map(
+      (row) => [row.id, row.title],
+    ),
+  );
+  const outcome: BulkOutcome = { done: 0, skipped: [] };
+  for (const bookId of ids) {
+    if (!titles.has(bookId)) continue;
+    try {
+      await action(bookId);
+      outcome.done += 1;
+    } catch (error) {
+      if (!(error instanceof ConflictError)) throw error;
+      outcome.skipped.push({ title: titles.get(bookId)!, reason: error.message });
+    }
+  }
+  return outcome;
+}
+
+export function bulkSetLendable(db: Database, teacherId: string, bookIds: string[], lendable: boolean): Promise<BulkOutcome> {
+  return eachBook(db, teacherId, bookIds, (bookId) => setBookLendable(db, teacherId, bookId, lendable));
+}
+
+export function bulkDeleteBooks(db: Database, teacherId: string, bookIds: string[]): Promise<BulkOutcome> {
+  return eachBook(db, teacherId, bookIds, (bookId) => deleteBook(db, teacherId, bookId));
 }
