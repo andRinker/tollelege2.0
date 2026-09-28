@@ -27,6 +27,7 @@ import {
 import { shapePath } from "@/ui/shapes/shapes";
 import { DEFAULT_THEME_SEED, THEME_SWATCHES } from "@/ui/theme/constants";
 import { previewTheme } from "@/ui/theme/preview";
+import { FindSeries } from "./find-series";
 import { saveSettings, type SettingsPatch } from "./actions";
 import { READING_LEVEL_SYSTEM_LABELS } from "@/lib/reading-levels";
 
@@ -227,6 +228,7 @@ export function SettingsForm({ settings, teacher, timeZones }: Props) {
           <LinkButton href="/settings/genres" variant="tonal" icon={iconPalette} className="self-start">
             Genres and dot colours
           </LinkButton>
+          <FindSeries />
         </SettingsSection>
 
         <SettingsSection

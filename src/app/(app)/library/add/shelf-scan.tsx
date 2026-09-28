@@ -186,7 +186,8 @@ export function ShelfScanDialog({
         } else {
           // The first adds the book; any more are further copies of it, which is what the
           // ordinary scan path does with an ISBN the library already has.
-          const result = await quickAddAction(proposal.candidates[row.chosen].isbn13);
+          // The series printed on the spine fills in a book whose catalogue record has none.
+          const result = await quickAddAction(proposal.candidates[row.chosen].isbn13, { series: row.slot.reading?.series });
           if (result.status !== "added") failed += 1;
           else if (result.result.outcome === "copy_added") copied += 1;
           else added += 1;

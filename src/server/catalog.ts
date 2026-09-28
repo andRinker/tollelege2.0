@@ -2,7 +2,7 @@ import { and, asc, count, desc, eq, ilike, inArray, isNotNull, isNull, max, or, 
 import type { Database } from "@/db/client";
 import { books, type CopyStatus, copies, type GenreColor, genres, loans, type MetadataSource, students } from "@/db/schema";
 import { normalizeIsbn } from "@/lib/isbn";
-import { seriesKey } from "@/lib/series";
+import { type ParsedSeries, parseSeries, seriesKey } from "@/lib/series";
 import { renumberCopies } from "./copy-numbers";
 import { inScope } from "./coteaching";
 import { assertGenreOwned } from "./genres";
@@ -560,6 +560,34 @@ export async function listLibrary(
     ];
   });
   return { entries, total, books: rows.length, page, pageCount };
+}
+
+/**
+ * Gives a book a series it doesn't have yet, from a hint such as the series printed on its
+ * spine. A series the teacher (or a catalogue) already set is never replaced. Printed series
+ * are often in capitals, so they're tidied, and one the library already knows by another
+ * spelling takes that spelling, so a shelf photo can't split a series in two.
+ */
+export async function fillSeries(db: Database, teacherId: string, bookId: string, hint: string | null | undefined): Promise<void> {
+  const raw = hint?.replace(/\s+/g, " ").trim();
+  if (!raw) return;
+  const parsed = parseSeries(raw === raw.toUpperCase() ? raw.toLowerCase() : raw);
+  if (parsed) await setSeriesIfMissing(db, teacherId, bookId, parsed);
+}
+
+/** Sets a book's series only if it has none, in the library's own spelling of it. True if it was set. */
+export async function setSeriesIfMissing(db: Database, teacherId: string, bookId: string, series: ParsedSeries): Promise<boolean> {
+  const known = await db
+    .selectDistinct({ series: books.series })
+    .from(books)
+    .where(and(eq(books.teacherId, teacherId), isNotNull(books.series)));
+  const name = known.find((row) => seriesKey(row.series!) === seriesKey(series.name))?.series ?? series.name;
+  const updated = await db
+    .update(books)
+    .set({ series: name, seriesNumber: series.number })
+    .where(and(eq(books.id, bookId), eq(books.teacherId, teacherId), isNull(books.series)))
+    .returning({ id: books.id });
+  return updated.length > 0;
 }
 
 export async function catalogSummary(db: Database, teacherId: string) {

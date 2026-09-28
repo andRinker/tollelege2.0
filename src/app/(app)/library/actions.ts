@@ -139,11 +139,12 @@ export async function addBookAction(input: BookDetailsInput, copyCount: number):
 
 export type QuickAddActionResult = QuickAddOutcome | { status: "error"; isbn13: string; message: string };
 
-export async function quickAddAction(raw: string): Promise<QuickAddActionResult> {
+export async function quickAddAction(raw: string, hints?: { series?: string | null }): Promise<QuickAddActionResult> {
   const classroom = await requireClassroom();
   const { teacherId } = classroom;
+  const series = z.string().max(200).nullish().safeParse(hints?.series);
   try {
-    const outcome = await addBookByScan(getDb(), teacherId, raw);
+    const outcome = await addBookByScan(getDb(), teacherId, raw, { series: series.success ? series.data : null });
     if (outcome.status === "added") revalidateLibrary();
     return outcome;
   } catch (error) {

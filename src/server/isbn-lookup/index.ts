@@ -2,7 +2,17 @@ import { eq } from "drizzle-orm";
 import type { Database } from "@/db/client";
 import { isbnLookupCache } from "@/db/schema";
 import { mergeMetadata } from "./merge";
-import { type BookMetadata, type Fetch, fetchGoogleBooks, fetchOpenLibrary, LookupUnavailableError } from "./sources";
+import type { ParsedSeries } from "@/lib/series";
+import {
+  type BookMetadata,
+  type Fetch,
+  fetchGoogleBooks,
+  fetchOpenLibrary,
+  fetchOpenLibrarySeries,
+  LookupUnavailableError,
+} from "./sources";
+
+export { LookupUnavailableError } from "./sources";
 
 export type { BookMetadata } from "./sources";
 
@@ -70,6 +80,12 @@ export async function lookupIsbn(db: Database, isbn13: string, options: LookupOp
     .onConflictDoUpdate({ target: isbnLookupCache.isbn13, set: { payload: metadata, fetchedAt: now } });
 
   return metadata ? { status: "found", metadata } : { status: "not_found" };
+}
+
+/** Open Library's series for one ISBN, from the same source (or fixtures) as a lookup. */
+export async function lookupSeries(isbn13: string, options: { fetchFn?: Fetch } = {}): Promise<ParsedSeries | null> {
+  const fetchFn = options.fetchFn ?? (await fixtureFetch()) ?? fetch;
+  return fetchOpenLibrarySeries(isbn13, fetchFn);
 }
 
 /** With ISBN_LOOKUP_FIXTURES=1 (tests, E2E), lookups read canned responses instead of the network. */

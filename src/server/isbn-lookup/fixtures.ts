@@ -25,7 +25,15 @@ const FIXTURES: Record<string, Fixture> = {
     search: { docs: [{ title: "Harry Potter and the Philosopher's Stone", author_name: ["J. K. Rowling"] }] },
   },
   "9780545010221": {
-    edition: { title: "Harry Potter and the Deathly Hallows", publishers: ["Arthur A. Levine Books"], publish_date: "2007", number_of_pages: 759 },
+    // Only this one carries a series, as many real records don't: a second Harry Potter added
+    // with the series typed in is what makes a stack.
+    edition: {
+      title: "Harry Potter and the Deathly Hallows",
+      publishers: ["Arthur A. Levine Books"],
+      publish_date: "2007",
+      number_of_pages: 759,
+      series: ["Harry Potter ; 7"],
+    },
     search: { docs: [{ author_name: ["J. K. Rowling"] }] },
   },
   "9780062315007": {

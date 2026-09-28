@@ -1,5 +1,5 @@
 import { APP_NAME } from "@/lib/brand";
-import { parseSeries } from "@/lib/series";
+import { type ParsedSeries, parseSeries } from "@/lib/series";
 import type { CachedBookMetadata } from "@/db/schema/isbn-cache";
 
 export type BookMetadata = CachedBookMetadata;
@@ -110,6 +110,16 @@ export async function fetchOpenLibrary(isbn13: string, fetchFn: Fetch = fetch): 
     seriesNumber: series?.number ?? null,
     source: "openlibrary",
   };
+}
+
+/**
+ * Only the series from an edition record, for finding series for books catalogued before
+ * they were read. Null when the record has none; throws LookupUnavailableError when Open
+ * Library can't be reached, so a book isn't taken to have no series because of an outage.
+ */
+export async function fetchOpenLibrarySeries(isbn13: string, fetchFn: Fetch = fetch): Promise<ParsedSeries | null> {
+  const edition = (await getJson(fetchFn, `https://openlibrary.org/isbn/${isbn13}.json`)) as OpenLibraryEdition | null;
+  return (edition?.series ?? []).map((statement) => parseSeries(statement)).find(Boolean) ?? null;
 }
 
 type GoogleBooksResponse = {
