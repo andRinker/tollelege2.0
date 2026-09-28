@@ -59,7 +59,7 @@ test("a teacher catalogues a genre shelf, and every book added takes that genre"
     await field.fill("9780439708180");
     await field.press("Enter");
     await expect(page.getByText("Found", { exact: true })).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByRole("button", { name: /^Genre\b/ }).filter({ hasNotText: "for new books" }).last()).toContainText("Fantasy");
+    await expect(page.getByRole("button", { name: "Fantasy Genre", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Add to library" }).click();
     await expect(snackbar(page, /Added Harry Potter/)).toBeVisible();
   });
