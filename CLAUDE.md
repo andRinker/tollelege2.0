@@ -65,6 +65,10 @@ A teacher's shelves are sorted by genre and each spine wears a coloured dot, so 
 - **A hand-over carries a genre by name**: the recipient's genre of that name, any case, or a new one in the sender's colour (`genreForRecipient`).
 - Connected teachers don't see genres in Lending, so `/privacy` doesn't mention them; say so there first if that changes.
 
+### Acting on many books at once
+
+The library's **Select** mode (`library-books.tsx`) picks books by hand, by page, or every book matching the current filters (`listBookIds`, capped at `MAX_BULK_BOOKS`); `libraryQuery` in `catalog.ts` is the one filter builder both it and `listBooks` use, so "all matching" means what the page shows. Genre, bin and level are one `UPDATE` (`bulkUpdateBooks`). Lending and delete go **book by book** through `setBookLendable` and `deleteBook`, so every per-book rule still holds, and a refused book is reported in `skipped` with its reason rather than failing the rest. Co-teachers can set genre, bin and level; lending and delete are `assertOwner`.
+
 ## Book metadata
 
 `src/server/isbn-lookup/` asks Open Library and Google Books **at once** and merges them, rather than stopping at the first answer — each is stronger in different fields, and taking one whole record gives a worse book than combining both. Google's records come from publisher feeds (properly cased titles, clean author lists); Open Library's come from library catalogues (publisher, page count, cover, blurb). `merge.ts` also un-inverts `Last, First` author names and de-duplicates them. Results are cached in `isbn_lookup_cache`, shared across teachers, for 90 days when found and a day when not.
