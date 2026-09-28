@@ -15,6 +15,7 @@ export function parseLibraryFilters(params: SearchParams): Required<Pick<BookLis
     readingLevel: first(params.level) || undefined,
     location: first(params.bin) || undefined,
     genre: first(params.genre) || undefined,
+    series: first(params.series)?.slice(0, 120) || undefined,
     sort: (["title", "author", "recent"] as const).includes(sort as BookSort) ? (sort as BookSort) : "title",
     page: Number.isInteger(page) && page > 0 ? page : 1,
   };
@@ -26,4 +27,11 @@ export const LIBRARY_VIEW_COOKIE = "library-view";
 
 export function parseLibraryView(value: string | undefined): LibraryView {
   return value === "list" ? "list" : "grid";
+}
+
+/** Whether each series shows as one stack. On unless turned off, and kept per device like the view. */
+export const LIBRARY_GROUP_COOKIE = "library-series";
+
+export function parseLibraryGroup(value: string | undefined): boolean {
+  return value !== "off";
 }

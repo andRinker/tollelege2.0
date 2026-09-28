@@ -6,7 +6,7 @@ import { BookCover } from "@/components/book-cover";
 import { GenreLabel } from "@/components/genre";
 import { bookFormFromBook, type BookFormValue } from "@/components/book-form";
 import type { ReadingLevelSystem } from "@/db/schema/enums";
-import type { BookListItem } from "@/server/catalog";
+import type { BookListItem, LibraryEntry, SeriesStack } from "@/server/catalog";
 import { Button } from "@/ui/components/button";
 import { IconButton } from "@/ui/components/icon-button";
 import { List, ListItem } from "@/ui/components/list";
@@ -14,9 +14,12 @@ import { useSnackbar } from "@/ui/components/snackbar";
 import { iconBlock, iconDelete, iconEdit, iconSwapVert } from "@/ui/icons/generated";
 import { bookForEditAction, setBookLendableAction } from "./actions";
 import { type BookSuggestions, DeleteBookDialog, EditBookDialog } from "./book-dialogs";
+import { StackCover } from "./stack-cover";
 
 type Props = {
-  books: BookListItem[];
+  entries: LibraryEntry[];
+  /** Where a series stack opens. */
+  seriesHref: (name: string) => string;
   readingLevelSystem: ReadingLevelSystem;
   suggestions: BookSuggestions;
   /** False for a co-teacher, who can edit books but not delete them or change lending. */
@@ -27,23 +30,54 @@ type Props = {
  * The library as rows, for working through it rather than browsing it: each title carries
  * its three most-used actions, so tidying a shelf doesn't mean opening every book.
  */
-export function LibraryList({ books, readingLevelSystem, suggestions, canManage = true }: Props) {
+export function LibraryList({ entries, seriesHref, readingLevelSystem, suggestions, canManage = true }: Props) {
   return (
     <List aria-label="Books">
-      {books.map((book) => (
-        <LibraryRow
-          key={book.id}
-          book={book}
-          readingLevelSystem={readingLevelSystem}
-          suggestions={suggestions}
-          canManage={canManage}
-        />
-      ))}
+      {entries.map((entry) =>
+        entry.kind === "book" ? (
+          <LibraryRow
+            key={entry.book.id}
+            book={entry.book}
+            readingLevelSystem={readingLevelSystem}
+            suggestions={suggestions}
+            canManage={canManage}
+          />
+        ) : (
+          <SeriesRow key={`series-${entry.series.name}`} stack={entry.series} href={seriesHref(entry.series.name)} />
+        ),
+      )}
     </List>
   );
 }
 
-function LibraryRow({ book, readingLevelSystem, suggestions, canManage }: { book: BookListItem } & Omit<Props, "books">) {
+/** A series as one row: its books are a tap away, and edited there. */
+function SeriesRow({ stack, href }: { stack: SeriesStack; href: string }) {
+  return (
+    <ListItem
+      href={href}
+      leading={
+        <div className="w-10">
+          <StackCover stack={stack} size="sm" />
+        </div>
+      }
+      headline={stack.name}
+      supporting={
+        <span className="flex flex-col gap-1">
+          <span className="truncate">
+            <span className="text-primary">{`${stack.count} books`}</span>
+            {stack.first.authors.length > 0 && ` · ${stack.first.authors[0]}`}
+          </span>
+          <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <Availability available={stack.availableCopies} total={stack.totalCopies} />
+            {stack.genre && <GenreLabel genre={stack.genre} className="text-label-md text-on-surface-variant" />}
+          </span>
+        </span>
+      }
+    />
+  );
+}
+
+function LibraryRow({ book, readingLevelSystem, suggestions, canManage }: { book: BookListItem } & Omit<Props, "entries" | "seriesHref">) {
   const showSnackbar = useSnackbar();
   const [editing, setEditing] = useState<BookFormValue | null>(null);
   const [loadingEdit, setLoadingEdit] = useState(false);
