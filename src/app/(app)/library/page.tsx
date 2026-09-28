@@ -1,9 +1,6 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
-import { Availability } from "@/components/availability";
-import { BookCover } from "@/components/book-cover";
 import { getDb } from "@/db/client";
-import { GenreLabel } from "@/components/genre";
 import { catalogSummary, listBooks } from "@/server/catalog";
 import { listGenres } from "@/server/genres";
 import { requireClassroom } from "@/server/session";
@@ -11,11 +8,10 @@ import { getRequestSettings } from "@/server/theme";
 import { LinkButton } from "@/ui/components/button";
 import { EmptyState, PageHeader } from "@/ui/components/expressive";
 import { Fab } from "@/ui/components/fab";
-import { CardLink } from "@/ui/components/surfaces";
 import { iconBarcodeScanner, iconChevronLeft, iconChevronRight, iconLibraryAdd, iconSearch } from "@/ui/icons/generated";
 import { LIBRARY_VIEW_COOKIE, parseLibraryFilters, parseLibraryView } from "./filters";
 import { LibraryFilters } from "./library-filters";
-import { LibraryList } from "./library-list";
+import { LibraryBooks } from "./library-books";
 
 export const metadata: Metadata = { title: "Library" };
 
@@ -101,31 +97,16 @@ export default async function LibraryPage({ searchParams }: PageProps<"/library"
               description={isFiltered ? "Try a different search or clear the filters." : undefined}
               action={isFiltered && <LinkButton variant="tonal" href="/library">Clear filters</LinkButton>}
             />
-          ) : view === "list" ? (
-            <LibraryList
+          ) : (
+            <LibraryBooks
               books={result.items}
+              view={view}
+              total={result.total}
               readingLevelSystem={settings.readingLevelSystem}
               suggestions={{ tags: summary.tags, locations: summary.locations, genres }}
+              genres={genres}
               canManage={isOwner}
             />
-          ) : (
-            <ul className="grid grid-cols-2 gap-3 medium:grid-cols-3 expanded:grid-cols-4 large:grid-cols-5 xlarge:grid-cols-6">
-              {result.items.map((book) => (
-                <li key={book.id}>
-                  <CardLink href={`/library/${book.id}`} variant="filled" className="flex h-full flex-col gap-2 bg-surface-container-low p-2 pb-3">
-                    <BookCover title={book.title} coverUrl={book.coverUrl} />
-                    <div className="flex flex-col gap-0.5 px-1">
-                      <span className="line-clamp-2 text-title-sm text-on-surface">{book.title}</span>
-                      {book.authors.length > 0 && (
-                        <span className="truncate text-body-sm text-on-surface-variant">{book.authors.join(", ")}</span>
-                      )}
-                      {book.genre && <GenreLabel genre={book.genre} className="text-label-md text-on-surface-variant" />}
-                      <Availability available={book.availableCopies} total={book.totalCopies} className="pt-1" />
-                    </div>
-                  </CardLink>
-                </li>
-              ))}
-            </ul>
           )}
 
           {result.pageCount > 1 && (
@@ -154,7 +135,8 @@ export default async function LibraryPage({ searchParams }: PageProps<"/library"
         </>
       )}
 
-      {summary.titles > 0 && (
+      {/* When books are showing, the list carries this button, so it can hide it while choosing. */}
+      {summary.titles > 0 && result.items.length === 0 && (
         <div className="fixed right-4 bottom-[calc(80px+env(safe-area-inset-bottom))] z-20 medium:hidden">
           <Fab href="/library/add" icon={iconLibraryAdd} label="Add books" />
         </div>

@@ -2,10 +2,14 @@ import { readFileSync } from "node:fs";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Database } from "@/db/client";
-import { classes, copies, loans, students } from "@/db/schema";
+import { books, classes, copies, loans, students } from "@/db/schema";
 import {
   addCopies,
   type BookDetailsInput,
+  bulkDeleteBooks,
+  bulkSetLendable,
+  bulkUpdateBooks,
+  listBookIds,
   catalogSummary,
   createBook,
   deleteBook,
@@ -22,6 +26,7 @@ import {
 } from "@/server/catalog";
 import { checkInLoan, checkOutBook, recentActivity, undoCheckIn } from "@/server/circulation";
 import { ConflictError, NotFoundError } from "@/server/errors";
+import { listGenres } from "@/server/genres";
 import { getStudentDetail } from "@/server/roster";
 import type { BookMetadata } from "@/server/isbn-lookup";
 import { createTeacher, createTestDb, type TestDatabase } from "../helpers/test-db";
@@ -189,6 +194,58 @@ describe("catalog", () => {
     const lonely = await createBook(db, teacher, bookInput({ title: "Single copy" }));
     await expect(deleteCopy(db, teacher, lonely.copyIds[0])).rejects.toBeInstanceOf(ConflictError);
     await deleteBook(db, teacher, lonely.bookId);
+  });
+
+  describe("acting on many books at once", () => {
+    it("sets a genre, bin and level on the teacher's own books only", async () => {
+      const t = await createTeacher(db, "Bulk Teacher");
+      const other = await createTeacher(db, "Someone Else");
+      const mine = await Promise.all(["Holes", "Wonder", "Hatchet"].map((title) => createBook(db, t, bookInput({ title }))));
+      const theirs = await createBook(db, other, bookInput({ title: "Not Yours" }));
+      const mystery = (await listGenres(db, t)).find((genre) => genre.name === "Mystery")!;
+
+      const ids = [...mine.map((book) => book.bookId), theirs.bookId];
+      expect(await bulkUpdateBooks(db, t, ids, { genreId: mystery.id, location: "Bin 4", readingLevel: "S" })).toBe(3);
+      const rows = await db.select().from(books).where(eq(books.teacherId, t));
+      expect(rows.every((row) => row.genreId === mystery.id && row.location === "Bin 4" && row.readingLevel === "S")).toBe(true);
+      const [untouched] = await db.select().from(books).where(eq(books.id, theirs.bookId));
+      expect(untouched).toMatchObject({ genreId: null, location: null, readingLevel: null });
+
+      // Another teacher's genre is refused outright.
+      const theirGenre = (await listGenres(db, other))[0];
+      await expect(bulkUpdateBooks(db, t, ids, { genreId: theirGenre.id })).rejects.toBeInstanceOf(NotFoundError);
+    });
+
+    it("deletes what it may and says which it left, and why", async () => {
+      const t = await createTeacher(db, "Tidy Teacher");
+      const keep = await createBook(db, t, bookInput({ title: "Out With Ada" }));
+      const go = await Promise.all(["Gone One", "Gone Two"].map((title) => createBook(db, t, bookInput({ title }))));
+      await checkOut(db, t, keep.copyIds[0]);
+
+      const outcome = await bulkDeleteBooks(db, t, [keep.bookId, ...go.map((book) => book.bookId)]);
+      expect(outcome.done).toBe(2);
+      expect(outcome.skipped).toEqual([{ title: "Out With Ada", reason: expect.stringContaining("checked out") }]);
+      expect((await db.select({ title: books.title }).from(books).where(eq(books.teacherId, t))).map((row) => row.title)).toEqual([
+        "Out With Ada",
+      ]);
+    });
+
+    it("holds back and offers many titles for lending", async () => {
+      const t = await createTeacher(db, "Lending Teacher");
+      const made = await Promise.all(["One", "Two"].map((title) => createBook(db, t, bookInput({ title }))));
+      const outcome = await bulkSetLendable(db, t, made.map((book) => book.bookId), false);
+      expect(outcome).toEqual({ done: 2, skipped: [] });
+      expect((await db.select({ lendable: books.lendable }).from(books).where(eq(books.teacherId, t))).every((row) => !row.lendable)).toBe(true);
+    });
+
+    it("finds every book the filters select, on every page", async () => {
+      const t = await createTeacher(db, "Filter Teacher");
+      const fantasy = (await listGenres(db, t)).find((genre) => genre.name === "Fantasy")!;
+      for (let i = 0; i < 5; i++) await createBook(db, t, bookInput({ title: `Dragon ${i}`, genreId: fantasy.id }));
+      await createBook(db, t, bookInput({ title: "Plain" }));
+      expect(await listBookIds(db, t, { genre: fantasy.id, pageSize: 2 })).toHaveLength(5);
+      expect(await listBookIds(db, t, { query: "Plain" })).toHaveLength(1);
+    });
   });
 
   it("closes the gap a deleted copy leaves, keeping the copies in order", async () => {

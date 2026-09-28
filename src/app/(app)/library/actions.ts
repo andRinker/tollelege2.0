@@ -9,6 +9,12 @@ import { normalizeIsbn } from "@/lib/isbn";
 import {
   addCopies,
   type BookDetailsInput,
+  type BulkOutcome,
+  bulkDeleteBooks,
+  bulkSetLendable,
+  bulkUpdateBooks,
+  listBookIds,
+  MAX_BULK_BOOKS,
   createBook,
   deleteBook,
   deleteCopy,
@@ -25,6 +31,7 @@ import { type BookMetadata, lookupIsbn } from "@/server/isbn-lookup";
 import { addBookByScan, type QuickAddOutcome } from "@/server/quick-add";
 import { assertOwner } from "@/server/coteaching";
 import { requireClassroom } from "@/server/session";
+import { parseLibraryFilters } from "./filters";
 import {
   checkPhoto,
   describeShelfFailure,
@@ -287,5 +294,74 @@ export async function scanShelfAction(formData: FormData): Promise<ShelfScanActi
       return { status: "unavailable", message: describeShelfFailure(error.reason) };
     }
     return { status: "unavailable", message: handleError(error).message };
+  }
+}
+
+const bookIds = z.array(z.uuid()).min(1, "Select some books first.").max(MAX_BULK_BOOKS, `Select up to ${MAX_BULK_BOOKS} books at a time.`);
+
+/** Every book the current filters select, for "Select all". Read from the same filters the page uses. */
+export async function matchingBookIdsAction(params: Record<string, string>): Promise<ActionResult<{ ids: string[] }>> {
+  const { teacherId } = await requireClassroom();
+  const parsed = z.record(z.string(), z.string().max(200)).safeParse(params);
+  if (!parsed.success) return fail("Those filters aren't valid.");
+  // Every page of it, not just the one on screen.
+  const filters = { ...parseLibraryFilters(parsed.data), page: undefined };
+  return ok({ ids: await listBookIds(getDb(), teacherId, filters) });
+}
+
+const bulkPatch = z
+  .object({
+    genreId: z.uuid().nullable(),
+    location: optionalText(60),
+    readingLevel: optionalText(20),
+  })
+  .partial()
+  .strict();
+
+/**
+ * Sets a genre, bin or reading level on many books at once. A co-teacher may, as they may edit
+ * a book; it's the owner's library either way.
+ */
+export async function bulkEditBooksAction(ids: string[], patch: z.input<typeof bulkPatch>): Promise<ActionResult<{ updated: number }>> {
+  const { teacherId } = await requireClassroom();
+  const parsedIds = bookIds.safeParse(ids);
+  if (!parsedIds.success) return fail(parsedIds.error.issues[0]?.message ?? "Those books weren't found.");
+  const parsedPatch = bulkPatch.safeParse(patch);
+  if (!parsedPatch.success) return fail(parsedPatch.error.issues[0]?.message ?? "That change isn't valid.");
+  try {
+    const updated = await bulkUpdateBooks(getDb(), teacherId, parsedIds.data, parsedPatch.data);
+    revalidateLibrary();
+    return ok({ updated });
+  } catch (error) {
+    return handleError(error);
+  }
+}
+
+export async function bulkSetLendableAction(ids: string[], lendable: boolean): Promise<ActionResult<BulkOutcome>> {
+  const classroom = await requireClassroom();
+  const parsedIds = bookIds.safeParse(ids);
+  if (!parsedIds.success) return fail(parsedIds.error.issues[0]?.message ?? "Those books weren't found.");
+  try {
+    assertOwner(classroom, "change what this library lends");
+    const outcome = await bulkSetLendable(getDb(), classroom.teacherId, parsedIds.data, Boolean(lendable));
+    revalidateLibrary();
+    revalidatePath("/lending", "layout");
+    return ok(outcome);
+  } catch (error) {
+    return handleError(error);
+  }
+}
+
+export async function bulkDeleteBooksAction(ids: string[]): Promise<ActionResult<BulkOutcome>> {
+  const classroom = await requireClassroom();
+  const parsedIds = bookIds.safeParse(ids);
+  if (!parsedIds.success) return fail(parsedIds.error.issues[0]?.message ?? "Those books weren't found.");
+  try {
+    assertOwner(classroom, "delete books from this library");
+    const outcome = await bulkDeleteBooks(getDb(), classroom.teacherId, parsedIds.data);
+    revalidateLibrary();
+    return ok(outcome);
+  } catch (error) {
+    return handleError(error);
   }
 }
