@@ -1,4 +1,4 @@
-import { and, asc, count, eq, gt, isNotNull, isNull, type SQL } from "drizzle-orm";
+import { and, asc, count, eq, gt, inArray, isNotNull, isNull, type SQL } from "drizzle-orm";
 import type { Database } from "@/db/client";
 import { books } from "@/db/schema";
 import { setSeriesIfMissing } from "./catalog";
@@ -12,8 +12,11 @@ const AT_ONCE = 5;
 export type FindSeriesResult = {
   checked: number;
   found: number;
-  /** Books Open Library didn't answer for. Still without a series, so a fresh run asks again. */
-  unanswered: number;
+  /**
+   * Books Open Library didn't answer for in time, which it often doesn't when busy. They still
+   * have no series, and passing them back as `ids` asks about just those again.
+   */
+  unansweredIds: string[];
   /** Books with an ISBN and no series still after this batch. */
   remaining: number;
   /** Where the next batch starts, or null when this one reached the end. */
@@ -23,24 +26,31 @@ export type FindSeriesResult = {
 /**
  * Asks Open Library for the series of books catalogued before series were read, a batch at
  * a time, in id order from `after` so repeated presses walk the whole library rather than
- * asking about the same books again. Only books with an ISBN and no series are asked about,
- * and a series is only ever filled in, never replaced.
+ * asking about the same books again. With `ids`, asks about those books instead (the ones a
+ * walk left unanswered), and walks nothing. Only books with an ISBN and no series are asked
+ * about, and a series is only ever filled in, never replaced.
  */
 export async function findSeriesBatch(
   db: Database,
   teacherId: string,
-  options: { after?: string | null; fetchFn?: Fetch } = {},
+  options: { after?: string | null; ids?: string[]; fetchFn?: Fetch } = {},
 ): Promise<FindSeriesResult> {
   const unset: SQL[] = [eq(books.teacherId, teacherId), isNotNull(books.isbn13), isNull(books.series)];
   const batch = await db
     .select({ id: books.id, isbn13: books.isbn13 })
     .from(books)
-    .where(and(...unset, options.after ? gt(books.id, options.after) : undefined))
+    .where(
+      and(
+        ...unset,
+        options.ids ? inArray(books.id, options.ids.length ? options.ids : ["00000000-0000-0000-0000-000000000000"]) : undefined,
+        !options.ids && options.after ? gt(books.id, options.after) : undefined,
+      ),
+    )
     .orderBy(asc(books.id))
     .limit(FIND_SERIES_BATCH);
 
   let found = 0;
-  let unanswered = 0;
+  const unansweredIds: string[] = [];
   for (let start = 0; start < batch.length; start += AT_ONCE) {
     await Promise.all(
       batch.slice(start, start + AT_ONCE).map(async (book) => {
@@ -49,16 +59,19 @@ export async function findSeriesBatch(
           if (series && (await setSeriesIfMissing(db, teacherId, book.id, series))) found += 1;
         } catch (error) {
           if (!(error instanceof LookupUnavailableError)) throw error;
-          unanswered += 1;
+          unansweredIds.push(book.id);
         }
       }),
     );
   }
+
+  // A retry walks nothing, so it has no place in the walk to report.
+  if (options.ids) return { checked: batch.length, found, unansweredIds, remaining: 0, next: null };
 
   const last = batch.at(-1)?.id;
   const [{ remaining }] = await db
     .select({ remaining: count() })
     .from(books)
     .where(and(...unset, last ? gt(books.id, last) : undefined));
-  return { checked: batch.length, found, unanswered, remaining, next: remaining > 0 && last ? last : null };
+  return { checked: batch.length, found, unansweredIds, remaining, next: remaining > 0 && last ? last : null };
 }

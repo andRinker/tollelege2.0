@@ -54,6 +54,14 @@ test("a series shows as one stack in the library, and opens to its books in orde
     await expect(page.getByRole("link", { name: /Harry Potter, book 7/ })).toBeVisible();
   });
 
+  await test.step("finding series checks the books without one, and says when it's done", async () => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Find series for my library" }).click();
+    // Only Frog and Toad is left without a series, and its record has none.
+    await expect(page.getByText(/Checked 1 book and found a series for 0\. That's every book\./)).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("button", { name: /Find series|more|again/ })).toHaveCount(0);
+  });
+
   await test.step("stacks can be turned off", async () => {
     await page.goto("/library");
     await page.getByRole("button", { name: "Sort" }).click();
