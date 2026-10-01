@@ -5,7 +5,7 @@ import { z } from "zod";
 import { getDb } from "@/db/client";
 import { readingLevelSystems, themeContrasts, themeModes } from "@/db/schema/enums";
 import { type ActionResult, fail, ok } from "@/lib/action-result";
-import { findSeriesBatch, type FindSeriesResult } from "@/server/find-series";
+import { FIND_SERIES_BATCH, findSeriesBatch, type FindSeriesResult } from "@/server/find-series";
 import { requireTeacher } from "@/server/session";
 import { isValidTimeZone, updateTeacherSettings } from "@/server/settings";
 
@@ -34,13 +34,20 @@ export async function saveSettings(patch: SettingsPatch): Promise<ActionResult> 
   return ok();
 }
 
-/** One batch of "Find series for my library". Always the teacher's own library, like Settings. */
-export async function findSeriesAction(after: string | null): Promise<ActionResult<FindSeriesResult>> {
+/**
+ * One batch of "Find series for my library": the next books from `after`, or with `retry`, the
+ * books an earlier batch left unanswered. Always the teacher's own library, like Settings.
+ */
+export async function findSeriesAction(
+  after: string | null,
+  retry?: string[],
+): Promise<ActionResult<FindSeriesResult>> {
   const { teacherId } = await requireTeacher();
   const cursor = z.uuid().nullable().safeParse(after);
-  if (!cursor.success) return fail("Start again from the beginning.");
-  const result = await findSeriesBatch(getDb(), teacherId, { after: cursor.data });
-  if (result.checked > 0 && result.unanswered === result.checked) {
+  const ids = z.array(z.uuid()).max(FIND_SERIES_BATCH).optional().safeParse(retry);
+  if (!cursor.success || !ids.success) return fail("Start again from the beginning.");
+  const result = await findSeriesBatch(getDb(), teacherId, { after: cursor.data, ids: ids.data });
+  if (result.checked > 0 && result.unansweredIds.length === result.checked) {
     return fail("Open Library isn't answering right now. Try again in a few minutes.");
   }
   if (result.found > 0) revalidatePath("/library");

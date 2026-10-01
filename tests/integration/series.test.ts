@@ -77,7 +77,8 @@ describe("series", () => {
       const isbn = String(input).match(/isbn\/(\d+)\.json/)![1];
       asked.push(isbn);
       const n = Number(isbn.slice(-6));
-      if (n === 3) return new Response("Busy", { status: 503 });
+      // Book 4 has a series, but Open Library is too busy to say so the first time it's asked.
+      if (n === 4 && asked.filter((asking) => asking === isbn).length === 1) return new Response("Busy", { status: 503 });
       if (n % 2 === 0) return Response.json({ title: `Book ${n}`, series: [`The 39 clues ; bk. ${n}`] });
       return Response.json({ title: `Book ${n}` });
     }) as Fetch;
@@ -88,10 +89,17 @@ describe("series", () => {
     const second = await findSeriesBatch(db, t, { after: first.next, fetchFn });
     expect(second).toMatchObject({ checked: 5, remaining: 0, next: null });
     // Books are walked in id order, so which batch meets the busy answer varies; one does.
-    expect(first.unanswered + second.unanswered).toBe(1);
-    expect(first.found + second.found).toBe(15);
+    const unanswered = [...first.unansweredIds, ...second.unansweredIds];
+    expect(unanswered).toEqual([ids[3]]);
+    expect(first.found + second.found).toBe(14);
+    expect(await seriesOf(ids[3])).toEqual({ series: null, number: null });
+
+    // Asking again about just the unanswered book finds its series, and walks nothing else.
+    const retried = await findSeriesBatch(db, t, { ids: unanswered, fetchFn });
+    expect(retried).toMatchObject({ checked: 1, found: 1, unansweredIds: [], next: null });
 
     expect(asked).not.toContain(isbnFor(99));
+    expect(asked).toHaveLength(FIND_SERIES_BATCH + 6);
     expect(new Set(asked).size).toBe(FIND_SERIES_BATCH + 5);
     expect(await seriesOf(kept.bookId)).toEqual({ series: "Mine", number: 2 });
     const withSeries = await Promise.all(ids.map(seriesOf));
