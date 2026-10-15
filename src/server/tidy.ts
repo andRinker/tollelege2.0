@@ -2,6 +2,7 @@ import "server-only";
 import { and, asc, count, eq, gt, inArray, isNotNull } from "drizzle-orm";
 import type { Database } from "@/db/client";
 import { books } from "@/db/schema";
+import { sameSpelling, unifyAuthors } from "@/lib/authors";
 import {
   type CatalogueFacts,
   FILLABLE,
@@ -12,7 +13,7 @@ import {
   type TidyPatch,
   type TidySuggestion,
 } from "@/lib/tidy";
-import { setSeriesIfMissing } from "./catalog";
+import { libraryAuthorSpellings, setSeriesIfMissing } from "./catalog";
 import { lookupIsbn } from "./isbn-lookup";
 import { matchSpine } from "./shelf-scan/match";
 import { configuredModel, DEFAULT_MODEL, ENDPOINT } from "./shelf-scan/vision";
@@ -53,7 +54,14 @@ export type TidyBatch = {
 /** A series the library already has, with its books, so a new book is numbered the same way. */
 export type KnownSeries = { name: string; books: { title: string; number: number | null }[] };
 
-export type AskGemini = (books: TidyBook[], known: KnownSeries[], fetchFn: typeof fetch) => Promise<GeminiAnswer[]>;
+/** What the library already says, so Gemini's answers match it. */
+export type LibraryContext = {
+  series: KnownSeries[];
+  /** Every spelling of an author in the library, the most used first. */
+  authors: string[];
+};
+
+export type AskGemini = (books: TidyBook[], library: LibraryContext, fetchFn: typeof fetch) => Promise<GeminiAnswer[]>;
 
 const bookFields = {
   id: books.id,
@@ -102,20 +110,37 @@ export async function suggestTidyBatch(
     known.set(row.series!, entry);
   }
 
+  const knownAuthors = await libraryAuthorSpellings(db, teacherId);
   const fetchFn = options.fetchFn ?? fetch;
   const [catalogue, answers] = await Promise.all([
     Promise.all(batch.map((book) => catalogueFacts(db, book, options.fetchFn))),
-    (options.askGemini ?? askGemini)(batch, [...known.values()], fetchFn),
+    (options.askGemini ?? askGemini)(batch, { series: [...known.values()], authors: knownAuthors }, fetchFn),
   ]);
 
   const knownNames = [...known.keys()];
-  const suggestions = batch
-    .map((book, index) => screenSuggestion(book, { catalogue: catalogue[index], gemini: answers[index] ?? {}, knownSeries: knownNames }))
-    .filter((suggestion): suggestion is TidySuggestion => suggestion !== null);
+  // Spellings so far, the library's and then this batch's, so two answers can't drift apart by a full stop.
+  const spellings = [...knownAuthors];
+  const suggestions: TidySuggestion[] = [];
+  for (const [index, book] of batch.entries()) {
+    const gemini = { ...answers[index] };
+    if (gemini.authors) gemini.authors = gemini.authors.map((name) => settleSpelling(name, spellings));
+    const facts = { ...catalogue[index] };
+    if (facts.authors) facts.authors = unifyAuthors(facts.authors, knownAuthors);
+    const suggestion = screenSuggestion(book, { catalogue: facts, gemini, knownSeries: knownNames });
+    if (suggestion) suggestions.push(suggestion);
+  }
 
   const last = batch.at(-1)!.id;
   const [{ remaining }] = await db.select({ remaining: count() }).from(books).where(and(mine, gt(books.id, last)));
   return { checked: batch.length, suggestions, remaining, next: remaining > 0 ? last : null };
+}
+
+/** A spelling already used for this name, differing only in case, spacing or full stops; else the name, remembered. */
+function settleSpelling(name: string, spellings: string[]): string {
+  const settled = spellings.find((spelling) => sameSpelling(spelling, name));
+  if (settled) return settled;
+  spellings.push(name);
+  return name;
 }
 
 /**
@@ -198,7 +223,7 @@ const SCHEMA = {
   required: ["books"],
 } as const;
 
-function prompt(batch: TidyBook[], known: KnownSeries[]): string {
+function prompt(batch: TidyBook[], { series: known, authors }: LibraryContext): string {
   const lines = batch.map((book, index) =>
     [
       `${index + 1}. Title: ${book.title}`,
@@ -225,23 +250,25 @@ function prompt(batch: TidyBook[], known: KnownSeries[]): string {
   return `You are a school librarian tidying a classroom library's catalogue. For each numbered book below, answer with its number "n" and only the fields that need changing; leave a field null when it is already right or when you don't know.
 
 - title: the book's title as its publisher prints it, in title case, including a leading "The" or "A" if the real title has one. The same words, only better written. Never another book's title.
-- authors: the authors as their names appear on the book's cover, such as "C. S. Lewis" for "Clive Staples Lewis". The same people in the same order. If no authors are recorded, give them.
+- authors: the authors as their names appear on the book's cover, such as "C. S. Lewis" for "Clive Staples Lewis". The same people in the same order. If no authors are recorded, give them. Every book by one person must name them the same way: if the library already spells an author the way their covers do (listed below), use exactly that spelling, and give it for every book by them that is spelled any other way.
 - series and seriesNumber: only for a book whose series is "(none recorded)". The series it belongs to as readers know it, and its place in that series. If the library already has books in that series (listed below), use the library's name for the series and number the book the same way those books are numbered. Null if the book isn't part of a series.
 - description: only for a book marked "Needs a description": two or three plain sentences saying what the book is about, suitable for a school library and without spoilers.
 - sure: true only if you are certain of every field you gave. A book you don't recognise gets nulls and sure false. Never guess.
 
 Books:
 ${lines.join("\n")}
-${series.length ? `\nSeries already in this library:\n${series.join("\n")}` : ""}`;
+${series.length ? `\nSeries already in this library:\n${series.join("\n")}` : ""}${
+    authors.length ? `\n\nAuthors already in this library, as they are spelled there:\n${authors.slice(0, 300).join("; ")}` : ""
+  }`;
 }
 
 /** One request to Gemini for the whole batch. Answers come back in the batch's order. */
-export async function askGemini(batch: TidyBook[], known: KnownSeries[], fetchFn: typeof fetch = fetch): Promise<GeminiAnswer[]> {
+export async function askGemini(batch: TidyBook[], library: LibraryContext, fetchFn: typeof fetch = fetch): Promise<GeminiAnswer[]> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new TidyUnavailableError("GEMINI_API_KEY is not set.", "unconfigured");
   let model = configuredModel();
   const body = JSON.stringify({
-    contents: [{ parts: [{ text: prompt(batch, known) }] }],
+    contents: [{ parts: [{ text: prompt(batch, library) }] }],
     generationConfig: { responseMimeType: "application/json", responseSchema: SCHEMA, temperature: 0 },
   });
 
