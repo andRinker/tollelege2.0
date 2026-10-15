@@ -148,7 +148,8 @@ export default function PrivacyPage() {
             )}
             {usesShelfPhotos && (
               <li>
-                <strong>Google Gemini</strong> reads shelf photos, if you use &ldquo;Photograph a shelf.&rdquo; See below.
+                <strong>Google Gemini</strong> reads shelf photos, if you use &ldquo;Photograph a shelf,&rdquo; and suggests fixes
+                to your catalogue, if you use &ldquo;Tidy my library.&rdquo; See below.
               </li>
             )}
           </ul>
@@ -170,6 +171,18 @@ export default function PrivacyPage() {
               Point the camera at books, not at people. A photo of a shelf carries no student information; a photo of a classroom
               might. If you would rather not send photos anywhere, don&rsquo;t use this feature &mdash; scanning barcodes and
               typing ISBNs work exactly as before.
+            </p>
+          </Section>
+        )}
+
+        {usesShelfPhotos && (
+          <Section title="Tidying your library">
+            <p>
+              &ldquo;Tidy my library&rdquo; in Settings sends the titles, subtitles, authors, ISBNs, publishers, years and series
+              of your books to Google&rsquo;s Gemini service, ten at a time, which suggests missing series, tidier titles and
+              author names, and short descriptions. It also looks your books up in the catalogues above, by ISBN or by title and
+              author. Nothing about your students, classes or checkouts is sent, and nothing changes until you choose which
+              suggestions to apply. What Google does with what it receives is covered by their own privacy terms.
             </p>
           </Section>
         )}

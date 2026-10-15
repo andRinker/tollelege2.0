@@ -6,6 +6,7 @@ import { getDb } from "@/db/client";
 import { readingLevelSystems, themeContrasts, themeModes } from "@/db/schema/enums";
 import { type ActionResult, fail, ok } from "@/lib/action-result";
 import { FIND_SERIES_BATCH, findSeriesBatch, type FindSeriesResult } from "@/server/find-series";
+import { applyTidy, suggestTidyBatch, TIDY_BATCH, type TidyBatch, tidyConfigured, TidyUnavailableError } from "@/server/tidy";
 import { requireTeacher } from "@/server/session";
 import { isValidTimeZone, updateTeacherSettings } from "@/server/settings";
 
@@ -52,4 +53,53 @@ export async function findSeriesAction(
   }
   if (result.found > 0) revalidatePath("/library");
   return ok(result);
+}
+
+/**
+ * One batch of "Tidy my library": suggestions for the next books from `after`. Nothing is
+ * changed here; the teacher chooses what to apply.
+ */
+export async function suggestTidyAction(after: string | null): Promise<ActionResult<TidyBatch>> {
+  const { teacherId } = await requireTeacher();
+  if (!tidyConfigured()) return fail("Tidying needs Gemini, which isn't set up here.");
+  const cursor = z.uuid().nullable().safeParse(after);
+  if (!cursor.success) return fail("Start again from the beginning.");
+  try {
+    return ok(await suggestTidyBatch(getDb(), teacherId, { after: cursor.data }));
+  } catch (error) {
+    if (!(error instanceof TidyUnavailableError)) throw error;
+    console.error(`Tidy: ${error.message}`);
+    return fail(
+      error.reason === "unreadable"
+        ? "Gemini's answer couldn't be read. Try that batch again."
+        : "Gemini isn't answering right now. Try again in a few minutes.",
+    );
+  }
+}
+
+const text = (max: number) => z.string().trim().min(1).max(max);
+const tidyPatch = z
+  .object({
+    title: text(500),
+    authors: z.array(text(200)).min(1).max(10),
+    series: z.object({ name: text(120), number: z.number().min(0).max(9999).nullable() }).strict(),
+    subtitle: text(500),
+    description: text(5000),
+    coverUrl: text(1000),
+    publisher: text(300),
+    publishedYear: z.number().int().min(1000).max(2999),
+    pageCount: z.number().int().min(1).max(99_999),
+  })
+  .partial()
+  .strict();
+const tidyChanges = z.array(z.object({ bookId: z.uuid(), patch: tidyPatch }).strict()).max(TIDY_BATCH);
+
+/** Applies the tidy changes a teacher ticked. Each is checked again against the book as it is now. */
+export async function applyTidyAction(changes: unknown): Promise<ActionResult<{ changed: number }>> {
+  const { teacherId } = await requireTeacher();
+  const parsed = tidyChanges.safeParse(changes);
+  if (!parsed.success) return fail("Those changes couldn't be applied. Look at the batch again.");
+  const changed = await applyTidy(getDb(), teacherId, parsed.data);
+  if (changed > 0) revalidatePath("/library");
+  return ok({ changed });
 }
