@@ -80,6 +80,16 @@ The library's **Select** mode (`library-books.tsx`) picks books by hand, by page
 - Names saved before spelled-out places were read kept them ("…, Book Three"), so each such book was its own series and never stacked. Migration 0015 moved the word into `series_number`; its word list must match `NUMBER_WORDS` in `series.ts`.
 - Answers cached before series were read have no `series` key. Treat it as unknown, not as "no series"; that is what "Find series" is for.
 
+## Tidy my library
+
+Settings → "Tidy my library" (`src/server/tidy.ts`, shown only with `GEMINI_API_KEY`) walks the library 10 books a press, by id like "Find series", and **only suggests**: the teacher ticks what to apply (`applyTidy`), and doubtful suggestions start unticked, for the same reason shelf photos are confirmed. Each batch is the catalogues for each book's ISBN (`lookupIsbn`), a title-and-author search for a cover where there's none (an `exact` `matchSpine` candidate), and one Gemini request for the batch asking for a missing series (numbered like the library's own books of that series, which the prompt lists), the title as published, authors as their covers name them, and a description where there's none.
+
+`src/lib/tidy.ts` is the rule, checked once when suggesting (`screenSuggestion`) and again against the book as it is when applying (`stillApplies`), so an edit since, or a forged request, can't get past it:
+
+- A title may only become the same words (case, punctuation and a leading "The" aside), and authors only the same people by surname, in order. Never a different book.
+- Series and every other field are only ever filled when blank, catalogue before Gemini, since the catalogue describes the printing on the shelf. A cover must be https from a catalogue host (`acceptableCover`).
+- `/privacy` says what is sent to Gemini; keep it matching the prompt.
+
 ## Book metadata
 
 `src/server/isbn-lookup/` asks Open Library and Google Books **at once** and merges them, rather than stopping at the first answer — each is stronger in different fields, and taking one whole record gives a worse book than combining both. Google's records come from publisher feeds (properly cased titles, clean author lists); Open Library's come from library catalogues (publisher, page count, cover, blurb). `merge.ts` also un-inverts `Last, First` author names and de-duplicates them. Results are cached in `isbn_lookup_cache`, shared across teachers, for 90 days when found and a day when not.

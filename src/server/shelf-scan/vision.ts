@@ -49,10 +49,10 @@ export class ShelfScanUnavailableError extends Error {
   }
 }
 
-const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta";
+export const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta";
 // An alias rather than a pinned version, so the model can improve without a code change.
 // Numbered previews come and go, and some of them answer on a different API entirely.
-const DEFAULT_MODEL = "gemini-flash-latest";
+export const DEFAULT_MODEL = "gemini-flash-latest";
 /**
  * The longest one reading may take. Measured on a real 42-book shelf, the default model took
  * 15 to 45 seconds and occasionally more with its full thinking, and was right on nearly

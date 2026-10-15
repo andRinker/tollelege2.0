@@ -28,6 +28,7 @@ import { shapePath } from "@/ui/shapes/shapes";
 import { DEFAULT_THEME_SEED, THEME_SWATCHES } from "@/ui/theme/constants";
 import { previewTheme } from "@/ui/theme/preview";
 import { FindSeries } from "./find-series";
+import { TidyLibrary } from "./tidy-library";
 import { saveSettings, type SettingsPatch } from "./actions";
 import { READING_LEVEL_SYSTEM_LABELS } from "@/lib/reading-levels";
 
@@ -81,9 +82,11 @@ type Props = {
   settings: TeacherSettings;
   teacher: { name: string; email: string };
   timeZones: string[];
+  /** Whether "Tidy my library" can run here, which needs Gemini. */
+  tidyAvailable: boolean;
 };
 
-export function SettingsForm({ settings, teacher, timeZones }: Props) {
+export function SettingsForm({ settings, teacher, timeZones, tidyAvailable }: Props) {
   const router = useRouter();
   const showSnackbar = useSnackbar();
   const [, startTransition] = useTransition();
@@ -229,6 +232,7 @@ export function SettingsForm({ settings, teacher, timeZones }: Props) {
             Genres and dot colours
           </LinkButton>
           <FindSeries />
+          {tidyAvailable && <TidyLibrary />}
         </SettingsSection>
 
         <SettingsSection
