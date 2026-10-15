@@ -162,6 +162,45 @@ describe("tidy my library", () => {
     expect(new Set([...gemini.asked[0].titles, ...gemini.asked[1].titles]).size).toBe(TIDY_BATCH + 2);
   });
 
+  it("streams Gemini's answer and reports how many books it has answered for", async () => {
+    const previous = process.env.GEMINI_API_KEY;
+    process.env.GEMINI_API_KEY = "test-key";
+    const event = (text: string) => `data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text }] } }] })}\n\n`;
+    let url = "";
+    const fetchFn: typeof fetch = async (input) => {
+      url = String(input);
+      return new Response(event('{"books":[{"n":1,"sure":false},') + event('{"n":2,"title":"Holes","sure":true}]}'), {
+        headers: { "content-type": "text/event-stream" },
+      });
+    };
+    try {
+      const book = (title: string, id: string) => ({
+        id,
+        isbn13: null,
+        title,
+        subtitle: null,
+        authors: ["Someone"],
+        description: "Something.",
+        coverUrl: null,
+        publisher: null,
+        publishedYear: null,
+        pageCount: null,
+        series: null,
+        seriesNumber: null,
+      });
+      const progress: number[] = [];
+      const answers = await askGemini([book("A", "1"), book("holes", "2")], { series: [], authors: [] }, fetchFn, (step) =>
+        progress.push(step.answered),
+      );
+      expect(url).toContain(":streamGenerateContent?alt=sse");
+      expect(answers[1]).toMatchObject({ title: "Holes", sure: true });
+      expect(progress).toEqual([1, 2]);
+    } finally {
+      if (previous === undefined) delete process.env.GEMINI_API_KEY;
+      else process.env.GEMINI_API_KEY = previous;
+    }
+  });
+
   it("asks Gemini about the whole batch at once and reads its answers back by number", async () => {
     const previous = process.env.GEMINI_API_KEY;
     process.env.GEMINI_API_KEY = "test-key";

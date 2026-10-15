@@ -2,12 +2,12 @@ import "server-only";
 import { type MatchCandidate, type SpineMatch, matchSpine } from "./match";
 import { findOwned, type OwnedBook, type OwnedCandidate } from "./owned";
 import { mergeLooks, spinesSeen, tidyShelf } from "./second-look";
-import { readShelf, type ShelfScanFailure, spineKey, type SpineReading, ShelfScanUnavailableError } from "./vision";
+import { type ReadingProgress, readShelf, type ShelfScanFailure, spineKey, type SpineReading, ShelfScanUnavailableError } from "./vision";
 
 export type { MatchCandidate, MatchConfidence, SpineMatch } from "./match";
 export type { OwnedBook, OwnedCandidate } from "./owned";
 export type { SpineReading, SpineSighting } from "./vision";
-export { type ShelfScanFailure, shelfScanConfigured, ShelfScanUnavailableError } from "./vision";
+export { type ReadingProgress, type ShelfScanFailure, shelfScanConfigured, ShelfScanUnavailableError } from "./vision";
 
 /**
  * A scan runs inside one request, which the host stops at 180 seconds. The readings get
@@ -119,6 +119,9 @@ export type ShelfScan = {
   quick: boolean;
 };
 
+/** How far a scan has got, for a teacher watching it: a reading streaming in, then matching. */
+export type ShelfScanProgress = ({ stage: "reading" } & ReadingProgress) | { stage: "matching"; spines: number };
+
 /** A count a teacher could plausibly mean for one shelf, or null. */
 export function parseShelfCount(value: unknown): number | null {
   const count = Number(typeof value === "string" ? value.trim() : value);
@@ -147,8 +150,11 @@ export async function scanShelf(
     fetchFn?: typeof fetch;
     /** How many books the teacher counted on the shelf, if they did. */
     expected?: number | null;
+    /** Hears the scan move: each spine as a reading streams in, then the start of matching. */
+    onProgress?: (progress: ShelfScanProgress) => void;
   } = {},
 ): Promise<ShelfScan> {
+  const onProgress = options.onProgress && ((progress: ReadingProgress) => options.onProgress?.({ stage: "reading", ...progress }));
   const owned = options.owned ?? [];
   const fetchFn =
     options.fetchFn ??
@@ -159,12 +165,12 @@ export async function scanShelf(
   let quick = false;
   let firstReading;
   try {
-    firstReading = await readShelf(image, fetchFn, { expected, deadline: Math.min(deadline, Date.now() + CAREFUL_READING_MS) });
+    firstReading = await readShelf(image, fetchFn, { expected, deadline: Math.min(deadline, Date.now() + CAREFUL_READING_MS), onProgress });
   } catch (error) {
     if (!(error instanceof ShelfScanUnavailableError) || error.reason !== "timeout") throw error;
     console.warn(`Shelf scan: careful reading too slow, reading quickly instead: ${error.message}`);
     quick = true;
-    firstReading = await readShelf(image, fetchFn, { expected, deadline, quick });
+    firstReading = await readShelf(image, fetchFn, { expected, deadline, quick, onProgress });
   }
   const { sightings: first, otherShelf: firstOther } = firstReading;
   let sightings = mergeLooks(first, []);
@@ -176,7 +182,7 @@ export async function scanShelf(
   // After a quick reading there's no time for a careful second one, which is what a second look is.
   if (!quick && expected !== null && first.length > 0 && spinesSeen(first) < expected && deadline - Date.now() >= SECOND_LOOK_NEEDS_MS) {
     try {
-      const again = await readShelf(image, fetchFn, { again: { expected, previous: first }, deadline });
+      const again = await readShelf(image, fetchFn, { again: { expected, previous: first }, deadline, onProgress });
       sightings = mergeLooks(first, again.sightings);
       otherShelf = Math.max(otherShelf, again.otherShelf);
     } catch (error) {
@@ -203,6 +209,7 @@ export async function scanShelf(
     if (sighting.reading) readings.set(spineKey(sighting.reading), sighting.reading);
   }
   const keys = [...readings.keys()];
+  options.onProgress?.({ stage: "matching", spines: sightings.length });
   const matches = await inBatches(keys, CONCURRENCY, (key) => matchSpine(readings.get(key) as SpineReading, fetchFn));
   const matchFor = new Map(keys.map((key, nth) => [key, matches[nth]]));
 

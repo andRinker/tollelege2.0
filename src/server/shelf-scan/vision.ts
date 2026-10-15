@@ -1,4 +1,5 @@
 import "server-only";
+import { countKeys, readGeminiStream, streamUrl } from "../gemini-stream";
 
 /** One book as read off a spine. Nothing here is trusted until it matches a real catalogue record. */
 export type SpineReading = {
@@ -164,6 +165,9 @@ const SCHEMA = {
   required: ["spines"],
 } as const;
 
+/** Progress through a reading as it streams in: which pass, and how many spines listed so far. */
+export type ReadingProgress = { pass: "first reading" | "quick reading" | "second look"; spines: number };
+
 /** One reading of a photo: the shelf's spines, and how many from other shelves were left out. */
 export type ShelfReading = { sightings: SpineSighting[]; otherShelf: number };
 
@@ -218,6 +222,7 @@ export async function readShelf(
     again,
     deadline = Date.now() + TIMEOUT_MS,
     quick = false,
+    onProgress,
   }: {
     expected?: number | null;
     again?: { expected: number; previous: SpineSighting[] };
@@ -228,6 +233,8 @@ export async function readShelf(
      * left unread or muddled. Only for when a careful reading has already run out of time.
      */
     quick?: boolean;
+    /** Hears each new spine as the answer streams in, so the teacher sees the reading move. */
+    onProgress?: (progress: ReadingProgress) => void;
   } = {},
 ): Promise<ShelfReading> {
   if (process.env.SHELF_SCAN_FIXTURES === "1") {
@@ -238,7 +245,7 @@ export async function readShelf(
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new ShelfScanUnavailableError("GEMINI_API_KEY is not set.", "unconfigured");
   let model = configuredModel();
-  const pass = again ? "second look" : quick ? "quick reading" : "first reading";
+  const pass: ReadingProgress["pass"] = again ? "second look" : quick ? "quick reading" : "first reading";
   const body = JSON.stringify({
     contents: [
       {
@@ -253,7 +260,8 @@ export async function readShelf(
       responseMimeType: "application/json",
       responseSchema: SCHEMA,
       temperature: 0,
-      ...(quick ? { thinkingConfig: { thinkingLevel: "low" } } : thinkingConfig()),
+      // Thought summaries keep the stream moving while the model thinks; they're never read.
+      thinkingConfig: { ...(quick ? { thinkingLevel: "low" } : thinkingLevel()), includeThoughts: true },
     },
   });
 
@@ -266,7 +274,8 @@ export async function readShelf(
       throw new ShelfScanUnavailableError(`No time left to start a reading (${elapsed()}).`, "timeout");
     }
     try {
-      response = await fetchFn(`${ENDPOINT}/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+      // Streamed, so the answer arrives as it's written. The time limit still covers all of it.
+      response = await fetchFn(streamUrl(ENDPOINT, model, apiKey), {
         method: "POST",
         headers: { "content-type": "application/json" },
         signal: AbortSignal.timeout(Math.min(TIMEOUT_MS, remaining)),
@@ -305,17 +314,24 @@ export async function readShelf(
     );
   }
 
-  const payload = (await response.json()) as {
-    candidates?: { finishReason?: string; content?: { parts?: { text?: string; thought?: boolean }[] } }[];
-    promptFeedback?: { blockReason?: string };
-  };
-  const candidate = payload.candidates?.[0];
-  // An answer can arrive in several parts; a model that thinks may also send its thoughts.
-  const raw = (candidate?.content?.parts ?? [])
-    .filter((part) => !part.thought)
-    .map((part) => part.text ?? "")
-    .join("");
-  const finish = candidate?.finishReason ?? payload.promptFeedback?.blockReason ?? "none";
+  let raw: string;
+  let finish: string;
+  try {
+    let spines = 0;
+    ({ text: raw, finish } = await readGeminiStream(response, {
+      onText: (_delta, soFar) => {
+        // Each spine is written with a "title" key, read or not; a new one is a spine more.
+        const listed = countKeys(soFar, "title");
+        if (listed !== spines) onProgress?.({ pass, spines: (spines = listed) });
+      },
+    }));
+  } catch (error) {
+    const timedOut = (error as Error).name === "TimeoutError" || (error as Error).name === "AbortError";
+    throw new ShelfScanUnavailableError(
+      `${timedOut ? "Timed out" : "Stream failed"} mid-answer (${elapsed()}): ${(error as Error).message}`,
+      timedOut ? "timeout" : "unreadable",
+    );
+  }
   if (!raw.trim()) {
     // No answer at all is only "an empty shelf" when the model finished normally.
     if (finish === "STOP") return { sightings: [], otherShelf: 0 };
@@ -384,7 +400,7 @@ export function configuredModel(raw = process.env.GEMINI_MODEL): string {
  * `GEMINI_THINKING` (minimal, low, medium or high) overrides how much the model thinks
  * before answering. Unset leaves the model's own default, which measured best on accuracy.
  */
-function thinkingConfig(): { thinkingConfig?: { thinkingLevel: string } } {
+export function thinkingLevel(): { thinkingLevel?: string } {
   const level = process.env.GEMINI_THINKING?.trim().toLowerCase();
-  return level && ["minimal", "low", "medium", "high"].includes(level) ? { thinkingConfig: { thinkingLevel: level } } : {};
+  return level && ["minimal", "low", "medium", "high"].includes(level) ? { thinkingLevel: level } : {};
 }

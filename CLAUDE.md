@@ -91,6 +91,14 @@ Settings → "Tidy my library" (`src/server/tidy.ts`, shown only with `GEMINI_AP
 - Series and every other field are only ever filled when blank, catalogue before Gemini, since the catalogue describes the printing on the shelf. A cover must be https from a catalogue host (`acceptableCover`).
 - `/privacy` says what is sent to Gemini; keep it matching the prompt.
 
+A batch is `POST /api/tidy`, a route rather than a server action so it can stream (see "Gemini requests" below), with `maxDuration` 300. Blocking, a batch took 5 to 90 seconds on a real library and twice hit the old 90-second cap; streamed, the request gets 240 seconds and is only given up on after 60 quiet ones.
+
+## Gemini requests
+
+Every Gemini call streams (`:streamGenerateContent?alt=sse`, read by `readGeminiStream` in `src/server/gemini-stream.ts`), with `includeThoughts` so the stream keeps moving while the model thinks; thoughts are never joined into the answer. The browser's side is a **progress stream** (`src/lib/progress-stream.ts`): newline-delimited JSON from the route, progress lines then the result, with a ping every 10 seconds. Shelf photos on Add books go through `POST /api/library/shelf-scan` and show spines as they are read; Tidy shows books answered. The phone's `/api/scan/shelf` streams from Gemini but still answers the phone with one JSON body.
+
+In the browser, every request that ends in a Gemini call goes through `src/lib/gemini-requests.ts`: `useSingleFlight` drops a repeat while one is in flight (buttons are disabled too, but a fast second press lands before the re-render), and each request is logged to the console as `[gemini] → #n` with a summary of its payload, its progress, and how it ended. No `useEffect` calls Gemini, and none should: StrictMode runs effects twice in development.
+
 ## Book metadata
 
 `src/server/isbn-lookup/` asks Open Library and Google Books **at once** and merges them, rather than stopping at the first answer — each is stronger in different fields, and taking one whole record gives a worse book than combining both. Google's records come from publisher feeds (properly cased titles, clean author lists); Open Library's come from library catalogues (publisher, page count, cover, blurb). `merge.ts` also un-inverts `Last, First` author names and de-duplicates them. `createBook` then gives each author the spelling the library already uses for the same person (`unifyAuthors` in `src/lib/authors.ts`: same surname, as many given names, each the same or its initial), so "Clive Staples Lewis" from one catalogue joins the library's "C. S. Lewis". "C. Lewis" is not "C. S. Lewis": merging two people is worse than two spellings. Handed-over and stand-in books are copied as they are. Results are cached in `isbn_lookup_cache`, shared across teachers, for 90 days when found and a day when not.

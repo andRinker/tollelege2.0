@@ -20,7 +20,6 @@ import {
   deleteCopy,
   findBookByIsbn,
   getBookForEdit,
-  listBookIdentities,
   setBookLendable,
   setCopyStatus,
   undoQuickAdd,
@@ -33,15 +32,7 @@ import { addBookByScan, type QuickAddOutcome } from "@/server/quick-add";
 import { assertOwner } from "@/server/coteaching";
 import { requireClassroom } from "@/server/session";
 import { parseLibraryFilters } from "./filters";
-import {
-  checkPhoto,
-  describeShelfFailure,
-  parseShelfCount,
-  scanShelf,
-  type ShelfScan,
-  shelfScanConfigured,
-  ShelfScanUnavailableError,
-} from "@/server/shelf-scan";
+import type { ShelfScan } from "@/server/shelf-scan";
 
 function handleError(error: unknown): { ok: false; message: string } {
   if (isUserFacingError(error)) return fail(error.message);
@@ -280,42 +271,12 @@ export async function deleteCopyAction(bookId: string, copyId: string): Promise<
   }
 }
 
+/** What a shelf scan answers with, at the end of the stream from `/api/library/shelf-scan`. */
 export type ShelfScanActionResult =
   | ({ status: "scanned" } & ShelfScan)
   | { status: "unconfigured" }
   | { status: "invalid"; message: string }
   | { status: "unavailable"; message: string };
-
-/**
- * Reads a shelf photo and proposes books for it. Adds nothing: everything returned is a
- * suggestion for the teacher to confirm, and confirming goes through `quickAddAction`
- * like any other scan. The photo is never written to disk or to the database.
- */
-export async function scanShelfAction(formData: FormData): Promise<ShelfScanActionResult> {
-  const classroom = await requireClassroom();
-  const { teacherId } = classroom;
-  if (!shelfScanConfigured()) return { status: "unconfigured" };
-
-  const photo = checkPhoto(formData.get("photo"));
-  if ("error" in photo) return { status: "invalid", message: photo.error };
-
-  try {
-    // The teacher's own catalogue goes in, so a second printing of a book they already
-    // have offers another copy instead of quietly creating a duplicate title.
-    const owned = await listBookIdentities(getDb(), teacherId);
-    // The teacher's count of books on the shelf, if they gave one: it checks the photo, and
-    // earns a second look when the photo comes up short.
-    const expected = parseShelfCount(formData.get("expected"));
-    const scan = await scanShelf({ data: await photo.data.arrayBuffer(), mimeType: photo.mimeType }, { owned, expected });
-    return { status: "scanned", ...scan };
-  } catch (error) {
-    if (error instanceof ShelfScanUnavailableError) {
-      console.warn(`Shelf scan unavailable (${error.reason}): ${error.message}`);
-      return { status: "unavailable", message: describeShelfFailure(error.reason) };
-    }
-    return { status: "unavailable", message: handleError(error).message };
-  }
-}
 
 const bookIds = z.array(z.uuid()).min(1, "Select some books first.").max(MAX_BULK_BOOKS, `Select up to ${MAX_BULK_BOOKS} books at a time.`);
 

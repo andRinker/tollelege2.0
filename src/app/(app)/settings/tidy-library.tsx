@@ -2,14 +2,16 @@
 
 import { useState } from "react";
 import { BookCover } from "@/components/book-cover";
+import type { ActionResult } from "@/lib/action-result";
+import { postWithProgress, useSingleFlight } from "@/lib/gemini-requests";
 import { formatSeriesNumber } from "@/lib/series";
 import type { TidyPatch, TidySuggestion } from "@/lib/tidy";
-import type { TidyBatch } from "@/server/tidy";
+import type { TidyBatch, TidyProgress } from "@/server/tidy";
 import { Button } from "@/ui/components/button";
 import { Checkbox } from "@/ui/components/selection-controls";
 import { useSnackbar } from "@/ui/components/snackbar";
 import { iconAutoStories, iconCheck } from "@/ui/icons/generated";
-import { applyTidyAction, suggestTidyAction } from "./actions";
+import { applyTidyAction } from "./actions";
 
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
 
@@ -26,11 +28,27 @@ export function TidyLibrary() {
   const [walk, setWalk] = useState<Walk | null>(null);
   const [suggestions, setSuggestions] = useState<TidySuggestion[]>([]);
   const [chosen, setChosen] = useState<Set<string>>(new Set());
+  const [progress, setProgress] = useState<TidyProgress | null>(null);
+  // One batch at a time: each is a Gemini request, and a repeat press would be another.
+  const singleFlight = useSingleFlight("tidy");
 
-  async function look(after: string | null) {
-    setPending("look");
-    const result = await suggestTidyAction(after);
-    setPending(null);
+  function look(after: string | null) {
+    return singleFlight(async () => {
+      setPending("look");
+      setProgress(null);
+      let result: ActionResult<TidyBatch>;
+      try {
+        result = await postWithProgress<TidyProgress, ActionResult<TidyBatch>>("tidy", "/api/tidy", { after }, { after }, setProgress);
+      } catch {
+        result = { ok: false, message: "The connection dropped while checking those books. Try again." };
+      }
+      setPending(null);
+      setProgress(null);
+      show(result);
+    });
+  }
+
+  function show(result: ActionResult<TidyBatch>) {
     if (!result.ok) {
       showSnackbar({ message: result.message });
       return;
@@ -125,10 +143,16 @@ export function TidyLibrary() {
         )
       )}
       <p className="text-body-sm text-on-surface-variant" aria-live="polite">
-        {describeWalk(walk, suggestions.length)}
+        {pending === "look" ? describeProgress(progress) : describeWalk(walk, suggestions.length)}
       </p>
     </div>
   );
+}
+
+/** Where a batch has got to, as Gemini's answer streams in. */
+function describeProgress(progress: TidyProgress | null): string {
+  if (progress === null || progress.answered === 0) return "Checking the catalogues and asking Gemini about these books…";
+  return `Gemini has answered for ${progress.answered} of ${plural(progress.total, "book")}…`;
 }
 
 function describeWalk(walk: Walk | null, shown: number): string {

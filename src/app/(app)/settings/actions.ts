@@ -6,7 +6,7 @@ import { getDb } from "@/db/client";
 import { readingLevelSystems, themeContrasts, themeModes } from "@/db/schema/enums";
 import { type ActionResult, fail, ok } from "@/lib/action-result";
 import { FIND_SERIES_BATCH, findSeriesBatch, type FindSeriesResult } from "@/server/find-series";
-import { applyTidy, suggestTidyBatch, TIDY_BATCH, type TidyBatch, tidyConfigured, TidyUnavailableError } from "@/server/tidy";
+import { applyTidy, TIDY_BATCH } from "@/server/tidy";
 import { requireTeacher } from "@/server/session";
 import { isValidTimeZone, updateTeacherSettings } from "@/server/settings";
 
@@ -53,28 +53,6 @@ export async function findSeriesAction(
   }
   if (result.found > 0) revalidatePath("/library");
   return ok(result);
-}
-
-/**
- * One batch of "Tidy my library": suggestions for the next books from `after`. Nothing is
- * changed here; the teacher chooses what to apply.
- */
-export async function suggestTidyAction(after: string | null): Promise<ActionResult<TidyBatch>> {
-  const { teacherId } = await requireTeacher();
-  if (!tidyConfigured()) return fail("Tidying needs Gemini, which isn't set up here.");
-  const cursor = z.uuid().nullable().safeParse(after);
-  if (!cursor.success) return fail("Start again from the beginning.");
-  try {
-    return ok(await suggestTidyBatch(getDb(), teacherId, { after: cursor.data }));
-  } catch (error) {
-    if (!(error instanceof TidyUnavailableError)) throw error;
-    console.error(`Tidy: ${error.message}`);
-    return fail(
-      error.reason === "unreadable"
-        ? "Gemini's answer couldn't be read. Try that batch again."
-        : "Gemini isn't answering right now. Try again in a few minutes.",
-    );
-  }
 }
 
 const text = (max: number) => z.string().trim().min(1).max(max);
