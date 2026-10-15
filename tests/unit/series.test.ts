@@ -13,6 +13,12 @@ describe("parseSeries", () => {
     ["Diary of a wimpy kid", "Diary of a Wimpy Kid", null],
     ["Dog Man ;", "Dog Man", null],
     ["Wings of Fire ; v. 1.5", "Wings of Fire", 1.5],
+    ["The Chronicles of Narnia, Book Three", "The Chronicles of Narnia", 3],
+    ["Chronicles of Narnia ; bk. seven", "Chronicles of Narnia", 7],
+    ["The Lord of the Rings (Volume One)", "The Lord of the Rings", 1],
+    ["Dear America, Part Twelve", "Dear America", 12],
+    ["Fantastic Four", "Fantastic Four", null],
+    ["The Mysterious Benedict Society, Book Club", "The Mysterious Benedict Society, Book Club", null],
   ])("reads %j", (raw, name, number) => {
     expect(parseSeries(raw)).toEqual({ name, number });
   });
