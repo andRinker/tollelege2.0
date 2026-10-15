@@ -6,6 +6,7 @@ import { preparePhoto } from "@/components/prepare-photo";
 import { ShelfCountField } from "@/components/shelf-count-field";
 import { ShelfCropper } from "@/components/shelf-cropper";
 import type { CropBox } from "@/lib/crop";
+import { logGeminiRequest, useSingleFlight } from "@/lib/gemini-requests";
 import { normalizeIsbn } from "@/lib/isbn";
 import { cx } from "@/ui/cx";
 import { Button } from "@/ui/components/button";
@@ -189,15 +190,27 @@ export function PhoneScanner() {
     return () => clearInterval(timer);
   }, [pairing.kind, submit]);
 
+  // One shelf photo at a time: each is a Gemini call, and the phone's allowance is small.
+  const singleFlight = useSingleFlight("phone shelf photo");
+
   async function sendShelf(file: File, crop: CropBox | null) {
     setShelfState("sending");
     setShelfMessage(null);
+    let log: ReturnType<typeof logGeminiRequest> | null = null;
     try {
       const data = new FormData();
-      data.set("photo", await preparePhoto(file, crop));
+      const photo = await preparePhoto(file, crop);
+      data.set("photo", photo);
       if (shelfCount.trim()) data.set("expected", shelfCount.trim());
+      log = logGeminiRequest("phone shelf photo", "/api/scan/shelf", {
+        photoBytes: photo.size,
+        photoType: photo.type,
+        expected: shelfCount.trim() || null,
+        cropped: crop !== null,
+      });
       const response = await send("/api/scan/shelf", { method: "POST", body: data });
       const body = await response.json().catch(() => ({}));
+      log.done({ status: response.status, ...body });
       if (!response.ok) {
         setShelfState("failed");
         setShelfMessage(body.message ?? "That photo couldn't be read.");
@@ -220,7 +233,8 @@ export function PhoneScanner() {
           : "No spines could be read. Try a straighter photo of one shelf.",
       );
       setShelfCount("");
-    } catch {
+    } catch (error) {
+      log?.failed(error);
       setShelfState("failed");
       setShelfMessage("Couldn't send that photo. Check your connection and try again.");
     } finally {
@@ -295,7 +309,7 @@ export function PhoneScanner() {
           {shelfFile ? (
             <ShelfCropper
               file={shelfFile}
-              onUse={(crop) => void sendShelf(shelfFile, crop)}
+              onUse={(crop) => void singleFlight(() => sendShelf(shelfFile, crop))}
               busyLabel={shelfState === "sending" ? "Sending…" : undefined}
             />
           ) : (

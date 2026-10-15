@@ -679,7 +679,7 @@ describe("choosing the model", () => {
     expect(urls.map((url) => url.match(/models\/([^:]+)/)?.[1])).toEqual(["gemini-9-imaginary", "gemini-flash-latest"]);
   });
 
-  it("passes a thinking level through only when one is set", async () => {
+  it("passes a thinking level through only when one is set, and always asks for thought summaries", async () => {
     vi.stubEnv("GEMINI_API_KEY", "test-key");
     const bodies: { generationConfig: { thinkingConfig?: unknown } }[] = [];
     const fetchFn = (async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -689,7 +689,8 @@ describe("choosing the model", () => {
     await readShelf(image, fetchFn);
     vi.stubEnv("GEMINI_THINKING", "Low");
     await readShelf(image, fetchFn);
-    expect(bodies[0].generationConfig.thinkingConfig).toBeUndefined();
-    expect(bodies[1].generationConfig.thinkingConfig).toEqual({ thinkingLevel: "low" });
+    // Thought summaries keep a streamed answer moving while the model thinks.
+    expect(bodies[0].generationConfig.thinkingConfig).toEqual({ includeThoughts: true });
+    expect(bodies[1].generationConfig.thinkingConfig).toEqual({ thinkingLevel: "low", includeThoughts: true });
   });
 });

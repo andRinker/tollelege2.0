@@ -5,8 +5,9 @@ import { BookCover } from "@/components/book-cover";
 import { preparePhoto } from "@/components/prepare-photo";
 import { ShelfCropper } from "@/components/shelf-cropper";
 import type { CropBox } from "@/lib/crop";
+import { postWithProgress, useSingleFlight } from "@/lib/gemini-requests";
 import { describeGap } from "@/lib/shelf-gaps";
-import type { MatchCandidate, ShelfScan, ShelfSlot, ShelfTally } from "@/server/shelf-scan";
+import type { MatchCandidate, ShelfScan, ShelfScanProgress, ShelfSlot, ShelfTally } from "@/server/shelf-scan";
 import { cx } from "@/ui/cx";
 import { Button } from "@/ui/components/button";
 import { Dialog } from "@/ui/components/dialog";
@@ -27,7 +28,7 @@ import {
   iconPhotoCamera,
   iconRefresh,
 } from "@/ui/icons/generated";
-import { addCopyAction, quickAddAction, scanShelfAction } from "../actions";
+import { addCopyAction, quickAddAction, type ShelfScanActionResult } from "../actions";
 
 type Row = {
   slot: ShelfSlot;
@@ -40,10 +41,21 @@ type State =
   | { kind: "idle" }
   /** A photo picked, waiting to be cropped to one shelf (or sent whole). */
   | { kind: "cropping"; file: File; count: string }
-  | { kind: "reading" }
+  /** Waiting on the reader; `progress` is how far its answer has streamed in, once it starts. */
+  | { kind: "reading"; progress: ShelfScanProgress | null }
   | { kind: "review"; rows: Row[]; tally: ShelfTally; otherShelf: number; quick: boolean }
   | { kind: "adding"; done: number; total: number }
   | { kind: "error"; message: string };
+
+/** The reading's progress as the teacher sees it, updated as the answer streams in. */
+function describeReading(progress: ShelfScanProgress | null): string {
+  if (progress === null) return "Reading the spines…";
+  const spines = `${progress.spines} ${progress.spines === 1 ? "spine" : "spines"}`;
+  if (progress.stage === "matching") return `Read ${spines}. Finding each book…`;
+  if (progress.spines === 0) return progress.pass === "second look" ? "Taking a second look…" : "Reading the spines…";
+  if (progress.pass === "second look") return `Taking a second look: ${spines} so far…`;
+  return `Reading the spines: ${spines} so far…`;
+}
 
 /** What ended up filling a gap, as the row should say it. Display only. */
 export type GapFill = { title: string; note: string };
@@ -147,12 +159,28 @@ export function ShelfScanDialog({
     setState({ kind: "idle" });
   }
 
+  // One reading at a time: a second press on "Read this shelf" would be a second Gemini call.
+  const singleFlight = useSingleFlight("shelf scan");
+
   async function scan(file: File, count: string, crop: CropBox | null) {
-    setState({ kind: "reading" });
+    setState({ kind: "reading", progress: null });
     const data = new FormData();
-    data.set("photo", await preparePhoto(file, crop));
+    const photo = await preparePhoto(file, crop);
+    data.set("photo", photo);
     if (count.trim()) data.set("expected", count.trim());
-    const result = await scanShelfAction(data);
+    let result: ShelfScanActionResult;
+    try {
+      result = await postWithProgress<ShelfScanProgress, ShelfScanActionResult>(
+        "shelf scan",
+        "/api/library/shelf-scan",
+        data,
+        { photoBytes: photo.size, photoType: photo.type, expected: count.trim() || null, cropped: crop !== null },
+        (progress) => setState({ kind: "reading", progress }),
+      );
+    } catch {
+      setState({ kind: "error", message: "The connection dropped while reading the shelf. Try again." });
+      return;
+    }
 
     if (result.status === "unconfigured") {
       setState({ kind: "error", message: "Shelf photos aren't set up on this site yet." });
@@ -243,13 +271,15 @@ export function ShelfScanDialog({
         {state.kind === "idle" && <PhotoPicker onPick={(file, count) => setState({ kind: "cropping", file, count })} />}
 
         {state.kind === "cropping" && (
-          <ShelfCropper file={state.file} onUse={(crop) => void scan(state.file, state.count, crop)} />
+          <ShelfCropper file={state.file} onUse={(crop) => void singleFlight(() => scan(state.file, state.count, crop))} />
         )}
 
         {state.kind === "reading" && (
           <div className="grid place-items-center gap-3 py-12">
             <LoadingIndicator contained label="Reading the shelf" />
-            <p className="text-body-md text-on-surface-variant">Reading the spines…</p>
+            <p className="text-body-md text-on-surface-variant" aria-live="polite">
+              {describeReading(state.progress)}
+            </p>
             {/* A thorough reading of a full shelf takes a while; say so, so it isn't taken for a hang. */}
             <p className="text-body-sm text-on-surface-variant">A full shelf can take a minute or two.</p>
           </div>

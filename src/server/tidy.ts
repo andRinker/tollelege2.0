@@ -16,14 +16,22 @@ import {
 import { libraryAuthorSpellings, setSeriesIfMissing } from "./catalog";
 import { lookupIsbn } from "./isbn-lookup";
 import { matchSpine } from "./shelf-scan/match";
-import { configuredModel, DEFAULT_MODEL, ENDPOINT } from "./shelf-scan/vision";
+import { countKeys, readGeminiStream, streamUrl } from "./gemini-stream";
+import { configuredModel, DEFAULT_MODEL, ENDPOINT, thinkingLevel } from "./shelf-scan/vision";
 
 /**
  * Books looked at per press. Each may need a catalogue search for its cover, and the batch is
  * one Gemini request, so it is kept small enough to finish well inside a request.
  */
 export const TIDY_BATCH = 10;
-const GEMINI_TIMEOUT_MS = 90_000;
+/**
+ * The longest one Gemini request may take, start to finish. Measured on a real library with
+ * a blocking request, a batch took 5 to 90 seconds and twice hit the old 90-second cap, so
+ * the request now streams and is given most of its route's 300 seconds. A stream that goes
+ * quiet for `GEMINI_IDLE_MS` is given up on long before that.
+ */
+const GEMINI_TIMEOUT_MS = 240_000;
+const GEMINI_IDLE_MS = 60_000;
 const RETRYABLE = new Set([429, 500, 502, 503, 504]);
 
 export type TidyFailure = "unconfigured" | "busy" | "unreadable";
@@ -61,7 +69,15 @@ export type LibraryContext = {
   authors: string[];
 };
 
-export type AskGemini = (books: TidyBook[], library: LibraryContext, fetchFn: typeof fetch) => Promise<GeminiAnswer[]>;
+/** How far Gemini has got through a batch, as its answer streams in. */
+export type TidyProgress = { answered: number; total: number };
+
+export type AskGemini = (
+  books: TidyBook[],
+  library: LibraryContext,
+  fetchFn: typeof fetch,
+  onProgress?: (progress: TidyProgress) => void,
+) => Promise<GeminiAnswer[]>;
 
 const bookFields = {
   id: books.id,
@@ -87,7 +103,12 @@ const bookFields = {
 export async function suggestTidyBatch(
   db: Database,
   teacherId: string,
-  options: { after?: string | null; fetchFn?: typeof fetch; askGemini?: AskGemini } = {},
+  options: {
+    after?: string | null;
+    fetchFn?: typeof fetch;
+    askGemini?: AskGemini;
+    onProgress?: (progress: TidyProgress) => void;
+  } = {},
 ): Promise<TidyBatch> {
   const mine = eq(books.teacherId, teacherId);
   const batch: TidyBook[] = await db
@@ -114,7 +135,7 @@ export async function suggestTidyBatch(
   const fetchFn = options.fetchFn ?? fetch;
   const [catalogue, answers] = await Promise.all([
     Promise.all(batch.map((book) => catalogueFacts(db, book, options.fetchFn))),
-    (options.askGemini ?? askGemini)(batch, { series: [...known.values()], authors: knownAuthors }, fetchFn),
+    (options.askGemini ?? askGemini)(batch, { series: [...known.values()], authors: knownAuthors }, fetchFn, options.onProgress),
   ]);
 
   const knownNames = [...known.keys()];
@@ -263,13 +284,24 @@ ${series.length ? `\nSeries already in this library:\n${series.join("\n")}` : ""
 }
 
 /** One request to Gemini for the whole batch. Answers come back in the batch's order. */
-export async function askGemini(batch: TidyBook[], library: LibraryContext, fetchFn: typeof fetch = fetch): Promise<GeminiAnswer[]> {
+export async function askGemini(
+  batch: TidyBook[],
+  library: LibraryContext,
+  fetchFn: typeof fetch = fetch,
+  onProgress?: (progress: TidyProgress) => void,
+): Promise<GeminiAnswer[]> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new TidyUnavailableError("GEMINI_API_KEY is not set.", "unconfigured");
   let model = configuredModel();
   const body = JSON.stringify({
     contents: [{ parts: [{ text: prompt(batch, library) }] }],
-    generationConfig: { responseMimeType: "application/json", responseSchema: SCHEMA, temperature: 0 },
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseSchema: SCHEMA,
+      temperature: 0,
+      // Thought summaries keep the stream moving while the model thinks; they're never read.
+      thinkingConfig: { ...thinkingLevel(), includeThoughts: true },
+    },
   });
 
   const started = Date.now();
@@ -277,7 +309,8 @@ export async function askGemini(batch: TidyBook[], library: LibraryContext, fetc
   let response: Response;
   for (let attempt = 1; ; attempt++) {
     try {
-      response = await fetchFn(`${ENDPOINT}/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+      // Streamed, so a long answer arrives as it's written rather than all at once or not at all.
+      response = await fetchFn(streamUrl(ENDPOINT, model, apiKey), {
         method: "POST",
         headers: { "content-type": "application/json" },
         signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
@@ -300,11 +333,20 @@ export async function askGemini(batch: TidyBook[], library: LibraryContext, fetc
     throw new TidyUnavailableError(`HTTP ${response.status} (${elapsed()}): ${detail}`, "busy");
   }
 
-  const payload = (await response.json()) as { candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] } }[] };
-  const raw = (payload.candidates?.[0]?.content?.parts ?? [])
-    .filter((part) => !part.thought)
-    .map((part) => part.text ?? "")
-    .join("");
+  let raw: string;
+  try {
+    let answered = 0;
+    ({ text: raw } = await readGeminiStream(response, {
+      idleMs: GEMINI_IDLE_MS,
+      onText: (_delta, soFar) => {
+        // Each book's answer opens with its number, "n", so a new one is a book more.
+        const count = Math.min(countKeys(soFar, "n"), batch.length);
+        if (count !== answered) onProgress?.({ answered: (answered = count), total: batch.length });
+      },
+    }));
+  } catch (error) {
+    throw new TidyUnavailableError(`Stream failed mid-answer (${elapsed()}): ${(error as Error).message}`, "busy");
+  }
   let parsed: { books?: (GeminiAnswer & { n?: number })[] };
   try {
     parsed = JSON.parse(raw);
