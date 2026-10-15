@@ -40,9 +40,9 @@ const catalogueFetch: typeof fetch = async (input) => {
 
 /** Gemini, as the tests need it: answers by title, and remembers what it was asked. */
 function fakeGemini(answers: Record<string, GeminiAnswer>) {
-  const asked: { titles: string[]; series: string[] }[] = [];
-  const ask: AskGemini = async (batch, known) => {
-    asked.push({ titles: batch.map((book) => book.title), series: known.map((entry) => entry.name) });
+  const asked: { titles: string[]; series: string[]; authors: string[] }[] = [];
+  const ask: AskGemini = async (batch, library) => {
+    asked.push({ titles: batch.map((book) => book.title), series: library.series.map((entry) => entry.name), authors: library.authors });
     return batch.map((book) => answers[book.title] ?? {});
   };
   return { ask, asked };
@@ -71,6 +71,8 @@ describe("tidy my library", () => {
       t,
       bookInput({ isbn13: LWW, title: "Lion, the Witch And The Wardrobe", authors: ["Clive Staples Lewis"], publisher: "Collins", description: "Kept as it is." }),
     );
+    // Adding it now would take the library's "C. S. Lewis"; this is a book saved before that.
+    await db.update(books).set({ authors: ["Clive Staples Lewis"] }).where(eq(books.id, lww.bookId));
     const gemini = fakeGemini({
       "Lion, the Witch And The Wardrobe": {
         title: "The Lion, the Witch and the Wardrobe",
@@ -108,6 +110,30 @@ describe("tidy my library", () => {
       publisher: "Collins",
       description: "Kept as it is.",
     });
+  });
+
+  it("gives every book by one author the library's spelling", async () => {
+    const t = await createTeacher(db);
+    await createBook(db, t, bookInput({ title: "Prince Caspian", authors: ["C. S. Lewis"] }));
+    await createBook(db, t, bookInput({ title: "The Last Battle", authors: ["C. S. Lewis"] }));
+    // A new book takes the library's spelling of the same person, and keeps a different person as given.
+    const added = await createBook(db, t, bookInput({ title: "The Silver Chair", authors: ["Clive Staples Lewis", "Pauline Baynes"] }));
+    expect((await read(added.bookId)).authors).toEqual(["C. S. Lewis", "Pauline Baynes"]);
+
+    const old = await createBook(db, t, bookInput({ title: "The Magician's Nephew" }));
+    await db.update(books).set({ authors: ["Clive Staples Lewis"] }).where(eq(books.id, old.bookId));
+    const drifted = await createBook(db, t, bookInput({ title: "The Voyage of the Dawn Treader" }));
+    await db.update(books).set({ authors: ["C.S. Lewis"] }).where(eq(books.id, drifted.bookId));
+
+    // Gemini drifts by a full stop on one book; the library's own spelling wins.
+    const gemini = fakeGemini({
+      "The Magician's Nephew": { authors: ["C. S. Lewis"], sure: true },
+      "The Voyage of the Dawn Treader": { authors: ["C.S. Lewis"], sure: true },
+    });
+    const batch = await suggestTidyBatch(db, t, { fetchFn: catalogueFetch, askGemini: gemini.ask });
+    expect(gemini.asked[0].authors[0]).toBe("C. S. Lewis");
+    const byTitle = Object.fromEntries(batch.suggestions.map((suggestion) => [suggestion.title, suggestion.patch.authors]));
+    expect(byTitle).toEqual({ "The Magician's Nephew": ["C. S. Lewis"], "The Voyage of the Dawn Treader": ["C. S. Lewis"] });
   });
 
   it("checks a change again when it is applied, so edits since and other teachers' books are safe", async () => {
@@ -160,10 +186,15 @@ describe("tidy my library", () => {
         series: null,
         seriesNumber: null,
       }));
-      const answers = await askGemini(shelf, [{ name: "The Chronicles of Narnia", books: [{ title: "The Horse and His Boy", number: 3 }] }], fetchFn);
+      const answers = await askGemini(
+        shelf,
+        { series: [{ name: "The Chronicles of Narnia", books: [{ title: "The Horse and His Boy", number: 3 }] }], authors: ["C. S. Lewis", "Louis Sachar"] },
+        fetchFn,
+      );
       expect(answers).toEqual([{}, { n: 2, series: "The Chronicles of Narnia", seriesNumber: 2, sure: true }]);
       expect(prompt).toContain("2. Title: Lion, the Witch And The Wardrobe");
       expect(prompt).toContain("- The Chronicles of Narnia: 3 The Horse and His Boy");
+      expect(prompt).toContain("C. S. Lewis; Louis Sachar");
     } finally {
       if (previous === undefined) delete process.env.GEMINI_API_KEY;
       else process.env.GEMINI_API_KEY = previous;

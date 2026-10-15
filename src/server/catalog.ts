@@ -1,6 +1,7 @@
 import { and, asc, count, desc, eq, ilike, inArray, isNotNull, isNull, max, or, type SQL, sql } from "drizzle-orm";
 import type { Database } from "@/db/client";
 import { books, type CopyStatus, copies, type GenreColor, genres, loans, type MetadataSource, students } from "@/db/schema";
+import { unifyAuthors } from "@/lib/authors";
 import { normalizeIsbn } from "@/lib/isbn";
 import { type ParsedSeries, parseSeries, seriesKey } from "@/lib/series";
 import { renumberCopies } from "./copy-numbers";
@@ -69,11 +70,13 @@ export async function createBook(
   copyCount = 1,
 ): Promise<{ bookId: string; copyIds: string[] }> {
   await assertGenreOwned(db, teacherId, input.genreId ?? null);
+  // A catalogue's "Clive Staples Lewis" joins the library's "C. S. Lewis" rather than starting a second spelling.
+  const authors = unifyAuthors(input.authors, await libraryAuthorSpellings(db, teacherId));
   try {
     return await db.transaction(async (tx) => {
       const [book] = await tx
         .insert(books)
-        .values({ ...input, teacherId, tags: normalizeTags(input.tags) })
+        .values({ ...input, authors, teacherId, tags: normalizeTags(input.tags) })
         .returning({ id: books.id });
       const inserted = await tx
         .insert(copies)
@@ -87,6 +90,21 @@ export async function createBook(
     }
     throw error;
   }
+}
+
+/**
+ * Every spelling of an author in a teacher's library, the most used first, so the spelling most
+ * of their books already wear is the one a new book takes.
+ */
+export async function libraryAuthorSpellings(db: Database, teacherId: string): Promise<string[]> {
+  const author = sql<string>`unnest(${books.authors})`.as("author");
+  const listed = db.select({ author }).from(books).where(eq(books.teacherId, teacherId)).as("listed");
+  const rows = await db
+    .select({ author: listed.author, uses: count() })
+    .from(listed)
+    .groupBy(listed.author)
+    .orderBy(desc(count()), asc(listed.author));
+  return rows.map((row) => row.author);
 }
 
 export async function addCopies(
