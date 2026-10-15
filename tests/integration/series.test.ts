@@ -1,8 +1,9 @@
-import { eq } from "drizzle-orm";
+import { readFileSync } from "node:fs";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Database } from "@/db/client";
 import { books } from "@/db/schema";
-import { type BookDetailsInput, createBook, fillSeries } from "@/server/catalog";
+import { type BookDetailsInput, createBook, fillSeries, listLibrary } from "@/server/catalog";
 import { FIND_SERIES_BATCH, findSeriesBatch } from "@/server/find-series";
 import type { Fetch } from "@/server/isbn-lookup/sources";
 import { createTeacher, createTestDb, type TestDatabase } from "../helpers/test-db";
@@ -105,5 +106,26 @@ describe("series", () => {
     const withSeries = await Promise.all(ids.map(seriesOf));
     expect(withSeries[3]).toEqual({ series: "The 39 Clues", number: 4 });
     expect(withSeries[2]).toEqual({ series: null, number: null });
+  });
+
+  it("stacks books whose series names spelled out their place, once, with a migration", async () => {
+    const t = await createTeacher(db);
+    const horse = await createBook(db, t, bookInput({ title: "The Horse and His Boy", series: "The Chronicles of Narnia, Book Three" }));
+    const battle = await createBook(db, t, bookInput({ title: "The Last Battle", series: "Chronicles of Narnia", seriesNumber: 7 }));
+    const lord = await createBook(db, t, bookInput({ title: "Fellowship", series: "The Lord of the Rings (Volume One)", seriesNumber: 1.5 }));
+    const club = await createBook(db, t, bookInput({ title: "Club", series: "The Mysterious Benedict Society, Book Club" }));
+
+    const migration = readFileSync("drizzle/0015_series_spelled_numbers.sql", "utf8");
+    for (const statement of migration.split("--> statement-breakpoint")) await db.execute(sql.raw(statement));
+
+    expect(await seriesOf(horse.bookId)).toEqual({ series: "The Chronicles of Narnia", number: 3 });
+    expect(await seriesOf(battle.bookId)).toEqual({ series: "Chronicles of Narnia", number: 7 });
+    // A number already set is kept; only the name is tidied.
+    expect(await seriesOf(lord.bookId)).toEqual({ series: "The Lord of the Rings", number: 1.5 });
+    expect(await seriesOf(club.bookId)).toEqual({ series: "The Mysterious Benedict Society, Book Club", number: null });
+
+    const library = await listLibrary(db, t, { group: true });
+    const narnia = library.entries.find((entry) => entry.kind === "series");
+    expect(narnia?.kind === "series" && narnia.series.bookIds).toEqual([horse.bookId, battle.bookId]);
   });
 });
