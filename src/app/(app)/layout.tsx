@@ -8,6 +8,8 @@ import { claimHandovers } from "@/server/handover";
 import { getActingAdmin, getSession, requireClassroom, requireTeacher } from "@/server/session";
 import { rememberTimeZone } from "@/server/settings";
 import { getRequestSettings } from "@/server/theme";
+import { tidyConfigured } from "@/server/tidy";
+import { getTidyRunStatus } from "@/server/tidy-run";
 import { AppShell } from "./app-shell";
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
@@ -18,12 +20,13 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   // it here, the first time they're signed in with that email verified.
   if (session) await Promise.all([claimCoTeacherInvites(getDb(), session.user), claimHandovers(getDb(), session.user)]);
 
-  const [lendingWaiting, isAdmin, acting, classroom, sharedClassrooms] = await Promise.all([
+  const [lendingWaiting, isAdmin, acting, classroom, sharedClassrooms, tidyRun] = await Promise.all([
     lendingAttentionCount(getDb(), teacher.teacherId),
     currentUserIsAdmin(),
     getActingAdmin(),
     requireClassroom(),
     listSharedClassrooms(getDb(), teacher.teacherId),
+    tidyConfigured() ? getTidyRunStatus(getDb(), teacher.teacherId) : null,
   ]);
 
   // The root layout's inline script stores the browser time zone; save it once. Not while
@@ -46,6 +49,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         classNames: classes.map((klass) => klass.name),
       }))}
       currentClassroom={classroom.isOwner ? null : classroom.teacherId}
+      tidyRun={tidyRun}
       // Formatted here, in the teacher's zone, so the server and browser render the same time.
       actingUntil={
         acting

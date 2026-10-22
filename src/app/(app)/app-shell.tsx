@@ -6,7 +6,9 @@ import { Button as AriaButton, Header, MenuSection } from "react-aria-components
 import { authClient } from "@/lib/auth-client";
 import { switchClassroomAction } from "@/app/(app)/classes/coteacher-actions";
 import { revokeAllPairingsAction } from "@/app/(app)/library/add/pairing-actions";
+import type { TidyRunStatus } from "@/server/tidy-run";
 import { cx } from "@/ui/cx";
+import { TidyRunChip, TidyRunProvider } from "./tidy-runner";
 import { BrandMark } from "@/ui/components/brand";
 import { Avatar } from "@/ui/components/expressive";
 import { Button } from "@/ui/components/button";
@@ -194,6 +196,8 @@ type AppShellProps = {
   currentClassroom: string | null;
   /** When an admin is acting as this teacher, the time it lapses, already formatted. */
   actingUntil: string | null;
+  /** The teacher's "Tidy my library" run, kept going from here while any page is open. */
+  tidyRun: TidyRunStatus | null;
   children: ReactNode;
 };
 
@@ -240,6 +244,7 @@ export function AppShell({
   classrooms,
   currentClassroom,
   actingUntil,
+  tidyRun,
   children,
 }: AppShellProps) {
   const [expanded, setExpanded] = useState(railExpanded);
@@ -253,42 +258,47 @@ export function AppShell({
   }
 
   return (
-    <div className="min-h-dvh">
-      {actingUntil && <ActingBanner teacher={teacher} until={actingUntil} />}
-      <NavigationRail
-        destinations={DESTINATIONS}
-        footerDestinations={footerDestinations(isAdmin)}
-        expanded={expanded}
-        onToggle={toggleRail}
-      />
-      <div
-        className={cx(
-          "flex min-h-dvh flex-col transition-[padding] duration-350 ease-[var(--ease-default-spatial)]",
-          expanded ? "medium:pl-[280px]" : "medium:pl-24",
-        )}
-      >
-        <header className="sticky top-0 z-20 flex h-16 items-center gap-2 bg-surface/95 pr-2 pl-4 backdrop-blur medium:bg-transparent medium:backdrop-blur-none medium:pointer-events-none">
-          <BrandMark className="text-primary medium:hidden" />
-          <span className="grow" />
-          {classrooms.length > 0 && (
+    <TidyRunProvider initial={tidyRun}>
+      <div className="min-h-dvh">
+        {actingUntil && <ActingBanner teacher={teacher} until={actingUntil} />}
+        <NavigationRail
+          destinations={DESTINATIONS}
+          footerDestinations={footerDestinations(isAdmin)}
+          expanded={expanded}
+          onToggle={toggleRail}
+        />
+        <div
+          className={cx(
+            "flex min-h-dvh flex-col transition-[padding] duration-350 ease-[var(--ease-default-spatial)]",
+            expanded ? "medium:pl-[280px]" : "medium:pl-24",
+          )}
+        >
+          <header className="sticky top-0 z-20 flex h-16 items-center gap-2 bg-surface/95 pr-2 pl-4 backdrop-blur medium:bg-transparent medium:backdrop-blur-none medium:pointer-events-none">
+            <BrandMark className="text-primary medium:hidden" />
+            <span className="grow" />
             <span className="medium:pointer-events-auto medium:pt-4">
-              <ClassroomSwitcher classrooms={classrooms} current={currentClassroom} />
+              <TidyRunChip />
             </span>
-          )}
-          <span className="medium:pointer-events-auto medium:pt-4">
-            <AccountMenu teacher={teacher} isAdmin={isAdmin} acting={actingUntil !== null} />
-          </span>
-        </header>
-        <main className="mx-auto w-full max-w-[1280px] grow px-4 pb-[calc(96px+env(safe-area-inset-bottom))] medium:-mt-16 medium:px-8 medium:pb-12 expanded:px-12">
-          {room && (
-            <div className="pb-2 medium:pt-20">
-              <ClassroomStrip room={room} />
-            </div>
-          )}
-          {children}
-        </main>
+            {classrooms.length > 0 && (
+              <span className="medium:pointer-events-auto medium:pt-4">
+                <ClassroomSwitcher classrooms={classrooms} current={currentClassroom} />
+              </span>
+            )}
+            <span className="medium:pointer-events-auto medium:pt-4">
+              <AccountMenu teacher={teacher} isAdmin={isAdmin} acting={actingUntil !== null} />
+            </span>
+          </header>
+          <main className="mx-auto w-full max-w-[1280px] grow px-4 pb-[calc(96px+env(safe-area-inset-bottom))] medium:-mt-16 medium:px-8 medium:pb-12 expanded:px-12">
+            {room && (
+              <div className="pb-2 medium:pt-20">
+                <ClassroomStrip room={room} />
+              </div>
+            )}
+            {children}
+          </main>
+        </div>
+        <NavigationBar destinations={DESTINATIONS} />
       </div>
-      <NavigationBar destinations={DESTINATIONS} />
-    </div>
+    </TidyRunProvider>
   );
 }

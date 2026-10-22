@@ -6,7 +6,16 @@ import { getDb } from "@/db/client";
 import { readingLevelSystems, themeContrasts, themeModes } from "@/db/schema/enums";
 import { type ActionResult, fail, ok } from "@/lib/action-result";
 import { FIND_SERIES_BATCH, findSeriesBatch, type FindSeriesResult } from "@/server/find-series";
-import { applyTidy, TIDY_BATCH } from "@/server/tidy";
+import type { TidySuggestion } from "@/lib/tidy";
+import { tidyConfigured } from "@/server/tidy";
+import {
+  applyTidyRun,
+  discardTidyRun,
+  getTidyRunStatus,
+  startTidyRun,
+  tidyRunSuggestions,
+  type TidyRunStatus,
+} from "@/server/tidy-run";
 import { requireTeacher } from "@/server/session";
 import { isValidTimeZone, updateTeacherSettings } from "@/server/settings";
 
@@ -55,29 +64,43 @@ export async function findSeriesAction(
   return ok(result);
 }
 
-const text = (max: number) => z.string().trim().min(1).max(max);
-const tidyPatch = z
-  .object({
-    title: text(500),
-    authors: z.array(text(200)).min(1).max(10),
-    series: z.object({ name: text(120), number: z.number().min(0).max(9999).nullable() }).strict(),
-    subtitle: text(500),
-    description: text(5000),
-    coverUrl: text(1000),
-    publisher: text(300),
-    publishedYear: z.number().int().min(1000).max(2999),
-    pageCount: z.number().int().min(1).max(99_999),
-  })
-  .partial()
-  .strict();
-const tidyChanges = z.array(z.object({ bookId: z.uuid(), patch: tidyPatch }).strict()).max(TIDY_BATCH);
+const bookIds = z.array(z.uuid()).max(5000);
 
-/** Applies the tidy changes a teacher ticked. Each is checked again against the book as it is now. */
-export async function applyTidyAction(changes: unknown): Promise<ActionResult<{ changed: number }>> {
+/** Starts "Tidy my library" from the first book; the app frame then keeps it going. */
+export async function startTidyAction(): Promise<ActionResult<TidyRunStatus>> {
   const { teacherId } = await requireTeacher();
-  const parsed = tidyChanges.safeParse(changes);
-  if (!parsed.success) return fail("Those changes couldn't be applied. Look at the batch again.");
-  const changed = await applyTidy(getDb(), teacherId, parsed.data);
+  if (!tidyConfigured()) return fail("Tidying needs Gemini, which isn't set up here.");
+  return ok(await startTidyRun(getDb(), teacherId));
+}
+
+/** Where the teacher's run has got to, or null when there is none. */
+export async function tidyRunStatusAction(): Promise<ActionResult<TidyRunStatus | null>> {
+  const { teacherId } = await requireTeacher();
+  return ok(await getTidyRunStatus(getDb(), teacherId));
+}
+
+/** Everything a finished run found, for the review. */
+export async function tidyReviewAction(): Promise<ActionResult<TidySuggestion[]>> {
+  const { teacherId } = await requireTeacher();
+  return ok(await tidyRunSuggestions(getDb(), teacherId));
+}
+
+/**
+ * Applies the suggestions ticked, named by book: the changes themselves are the run's own,
+ * kept on the server, and each is checked again against the book as it is now.
+ */
+export async function applyTidyAction(ids: unknown): Promise<ActionResult<{ changed: number }>> {
+  const { teacherId } = await requireTeacher();
+  const parsed = bookIds.safeParse(ids);
+  if (!parsed.success) return fail("Those changes couldn't be applied.");
+  const changed = await applyTidyRun(getDb(), teacherId, parsed.data);
   if (changed > 0) revalidatePath("/library");
   return ok({ changed });
+}
+
+/** Ends the run without applying anything. */
+export async function discardTidyAction(): Promise<ActionResult<null>> {
+  const { teacherId } = await requireTeacher();
+  await discardTidyRun(getDb(), teacherId);
+  return ok(null);
 }
