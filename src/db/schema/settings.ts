@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { boolean, check, foreignKey, integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { boolean, check, foreignKey, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { user } from "./auth";
 import { genres } from "./catalog";
 import {
@@ -75,3 +75,32 @@ export const teacherSettings = pgTable(
     ),
   ],
 );
+
+/**
+ * "Tidy my library" working through the whole library on its own: where it has got to and
+ * what it has found, so it survives the tab closing and is reviewed once, at the end. One
+ * row per teacher; starting again replaces it, and applying or discarding deletes it.
+ */
+export const tidyRuns = pgTable("tidy_runs", {
+  teacherId: text("teacher_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  /** The last book looked at, by id; null before the first batch. */
+  after: uuid("after"),
+  checked: integer("checked").notNull().default(0),
+  /** Books still to look at after `after`, counted again with each batch. */
+  remaining: integer("remaining").notNull(),
+  /** Every `TidySuggestion` found so far, in the order found. */
+  suggestions: jsonb("suggestions").notNull().default([]),
+  /** Set when every book has been looked at; the run then waits for the teacher's review. */
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+  /** A batch is being worked on until then, so a second tab doesn't ask Gemini about it too. */
+  claimedUntil: timestamp("claimed_until", { withTimezone: true }),
+  /** Why the last batch failed, until one succeeds. */
+  lastError: text("last_error"),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+});

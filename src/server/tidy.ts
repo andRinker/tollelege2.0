@@ -3,6 +3,7 @@ import { and, asc, count, eq, gt, inArray, isNotNull } from "drizzle-orm";
 import type { Database } from "@/db/client";
 import { books } from "@/db/schema";
 import { sameSpelling, unifyAuthors } from "@/lib/authors";
+import { seriesKey } from "@/lib/series";
 import {
   type CatalogueFacts,
   FILLABLE,
@@ -108,6 +109,12 @@ export async function suggestTidyBatch(
     fetchFn?: typeof fetch;
     askGemini?: AskGemini;
     onProgress?: (progress: TidyProgress) => void;
+    /**
+     * What a run through the whole library has already suggested, not yet applied. Its series
+     * and author spellings count as the library's own, after the library's, so a series named
+     * in the first batch is named the same way in the last.
+     */
+    pending?: TidySuggestion[];
   } = {},
 ): Promise<TidyBatch> {
   const mine = eq(books.teacherId, teacherId);
@@ -130,8 +137,18 @@ export async function suggestTidyBatch(
     entry.books.push({ title: row.title, number: row.number });
     known.set(row.series!, entry);
   }
+  for (const { title, patch } of options.pending ?? []) {
+    if (!patch.series) continue;
+    const name = [...known.keys()].find((existing) => seriesKey(existing) === seriesKey(patch.series!.name)) ?? patch.series.name;
+    const entry = known.get(name) ?? { name, books: [] };
+    entry.books.push({ title: patch.title ?? title, number: patch.series.number });
+    known.set(name, entry);
+  }
 
   const knownAuthors = await libraryAuthorSpellings(db, teacherId);
+  for (const { patch } of options.pending ?? []) {
+    for (const name of patch.authors ?? []) if (!knownAuthors.includes(name)) knownAuthors.push(name);
+  }
   const fetchFn = options.fetchFn ?? fetch;
   const [catalogue, answers] = await Promise.all([
     Promise.all(batch.map((book) => catalogueFacts(db, book, options.fetchFn))),

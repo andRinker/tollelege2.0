@@ -1,169 +1,201 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { BookCover } from "@/components/book-cover";
-import type { ActionResult } from "@/lib/action-result";
-import { postWithProgress, useSingleFlight } from "@/lib/gemini-requests";
 import { formatSeriesNumber } from "@/lib/series";
 import type { TidyPatch, TidySuggestion } from "@/lib/tidy";
-import type { TidyBatch, TidyProgress } from "@/server/tidy";
+import type { TidyProgress } from "@/server/tidy";
+import type { TidyRunStatus } from "@/server/tidy-run";
 import { Button } from "@/ui/components/button";
 import { Checkbox } from "@/ui/components/selection-controls";
 import { useSnackbar } from "@/ui/components/snackbar";
 import { iconAutoStories, iconCheck } from "@/ui/icons/generated";
-import { applyTidyAction } from "./actions";
+import { useTidyRun } from "../tidy-runner";
+import { applyTidyAction, discardTidyAction, tidyReviewAction } from "./actions";
 
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
 
-type Walk = { checked: number; changed: number; next: string | null; remaining: number };
-
 /**
- * "Tidy my library": a batch of books at a time, the catalogues and Gemini suggest missing
- * series, tidier titles and author names, covers and blank details, and the teacher ticks
- * which to apply. Nothing changes until they do, and nothing they set is replaced.
+ * "Tidy my library": one press starts it looking through every book, 10 at a time, while the
+ * teacher carries on anywhere in the app (`TidyRunProvider` keeps it going). The catalogues
+ * and Gemini suggest missing series, tidier titles and author names, covers and blank
+ * details, and once every book has been looked at, the teacher ticks which to apply here.
+ * Nothing changes until they do, and nothing they set is replaced.
  */
 export function TidyLibrary() {
   const showSnackbar = useSnackbar();
-  const [pending, setPending] = useState<"look" | "apply" | null>(null);
-  const [walk, setWalk] = useState<Walk | null>(null);
-  const [suggestions, setSuggestions] = useState<TidySuggestion[]>([]);
+  const { status, progress, paused, start, resume, clear } = useTidyRun();
+  const [pending, setPending] = useState<"start" | "apply" | "discard" | null>(null);
+  const [suggestions, setSuggestions] = useState<TidySuggestion[] | null>(null);
   const [chosen, setChosen] = useState<Set<string>>(new Set());
-  const [progress, setProgress] = useState<TidyProgress | null>(null);
-  // One batch at a time: each is a Gemini request, and a repeat press would be another.
-  const singleFlight = useSingleFlight("tidy");
 
-  function look(after: string | null) {
-    return singleFlight(async () => {
-      setPending("look");
-      setProgress(null);
-      let result: ActionResult<TidyBatch>;
-      try {
-        result = await postWithProgress<TidyProgress, ActionResult<TidyBatch>>("tidy", "/api/tidy", { after }, { after }, setProgress);
-      } catch {
-        result = { ok: false, message: "The connection dropped while checking those books. Try again." };
+  const ready = status?.state === "ready";
+  useEffect(() => {
+    if (!ready) return;
+    let current = true;
+    void tidyReviewAction().then((result) => {
+      if (!current) return;
+      if (!result.ok) {
+        showSnackbar({ message: result.message });
+        return;
       }
-      setPending(null);
-      setProgress(null);
-      show(result);
+      setSuggestions(result.data);
+      setChosen(new Set(result.data.filter((suggestion) => suggestion.sure).map((suggestion) => suggestion.bookId)));
     });
-  }
+    return () => {
+      current = false;
+    };
+  }, [ready, showSnackbar]);
 
-  function show(result: ActionResult<TidyBatch>) {
-    if (!result.ok) {
-      showSnackbar({ message: result.message });
-      return;
-    }
-    absorb(result.data);
-  }
-
-  function absorb(batch: TidyBatch) {
-    setWalk((current) => ({
-      checked: (current?.checked ?? 0) + batch.checked,
-      changed: current?.changed ?? 0,
-      next: batch.next,
-      remaining: batch.remaining,
-    }));
-    setSuggestions(batch.suggestions);
-    setChosen(new Set(batch.suggestions.filter((suggestion) => suggestion.sure).map((suggestion) => suggestion.bookId)));
+  async function begin() {
+    setPending("start");
+    const problem = await start();
+    setPending(null);
+    if (problem) showSnackbar({ message: problem });
   }
 
   async function apply() {
-    const changes = suggestions
-      .filter((suggestion) => chosen.has(suggestion.bookId))
-      .map(({ bookId, patch }) => ({ bookId, patch }));
     setPending("apply");
-    const result = await applyTidyAction(changes);
+    const result = await applyTidyAction([...chosen]);
     setPending(null);
     if (!result.ok) {
       showSnackbar({ message: result.message });
       return;
     }
     showSnackbar({ message: `Tidied ${plural(result.data.changed, "book")}.` });
-    setWalk((current) => current && { ...current, changed: current.changed + result.data.changed });
-    setSuggestions([]);
-    if (walk?.next) await look(walk.next);
+    setSuggestions(null);
+    clear();
   }
 
-  function skip() {
-    setSuggestions([]);
-    if (walk?.next) void look(walk.next);
+  async function discard() {
+    setPending("discard");
+    const result = await discardTidyAction();
+    setPending(null);
+    if (!result.ok) {
+      showSnackbar({ message: result.message });
+      return;
+    }
+    setSuggestions(null);
+    clear();
   }
 
-  const finished = walk !== null && walk.next === null && suggestions.length === 0;
+  const tick = (bookId: string, selected: boolean) =>
+    setChosen((current) => {
+      const next = new Set(current);
+      if (selected) next.add(bookId);
+      else next.delete(bookId);
+      return next;
+    });
 
-  return (
-    <div className="flex flex-col items-start gap-3">
-      {suggestions.length > 0 ? (
-        <>
-          <ul aria-label="Suggested fixes" className="flex w-full flex-col gap-2">
-            {suggestions.map((suggestion) => (
-              <li key={suggestion.bookId} className="flex gap-3 rounded-lg bg-surface-container-low p-3">
-                <Checkbox
-                  aria-label={suggestion.title}
-                  isSelected={chosen.has(suggestion.bookId)}
-                  onChange={(selected) =>
-                    setChosen((current) => {
-                      const next = new Set(current);
-                      if (selected) next.add(suggestion.bookId);
-                      else next.delete(suggestion.bookId);
-                      return next;
-                    })
-                  }
-                  className="self-start"
-                />
-                <div className="w-12 shrink-0">
-                  <BookCover title={suggestion.title} coverUrl={suggestion.patch.coverUrl ?? suggestion.coverUrl} size="sm" />
-                </div>
-                <div className="flex min-w-0 flex-col gap-1">
-                  <span className="text-title-sm">{suggestion.title}</span>
-                  {!suggestion.sure && <span className="text-label-md text-on-surface-variant">Not certain. Check before applying.</span>}
-                  <ul className="flex flex-col gap-0.5 text-body-sm text-on-surface-variant">
-                    {describePatch(suggestion).map((line) => (
-                      <li key={line}>{line}</li>
-                    ))}
-                  </ul>
-                </div>
-              </li>
-            ))}
-          </ul>
-          <div className="flex flex-wrap gap-2">
-            <Button variant="filled" icon={iconCheck} isPending={pending !== null} isDisabled={chosen.size === 0} onPress={() => void apply()}>
-              {`Apply ${plural(chosen.size, "change")}`}
+  if (status === null) {
+    return (
+      <div id="tidy" className="flex scroll-mt-24 flex-col items-start gap-3">
+        <Button variant="tonal" icon={iconAutoStories} isPending={pending === "start"} onPress={() => void begin()}>
+          Tidy my library
+        </Button>
+        <p className="text-body-sm text-on-surface-variant">
+          Looks through every book and suggests fixes: missing series, tidier titles and author names, covers, and blank details. It keeps going while you use the rest of the app, and when every book has been looked at you choose what to apply here. Titles, authors and series are sent to Google Gemini. Nothing you&apos;ve set is replaced.
+        </p>
+      </div>
+    );
+  }
+
+  if (status.state === "running") {
+    return (
+      <div id="tidy" className="flex scroll-mt-24 flex-col items-start gap-3">
+        <p className="text-body-sm text-on-surface-variant" aria-live="polite">
+          {describeRun(status, progress, paused)}
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {paused && (
+            <Button variant="tonal" icon={iconAutoStories} onPress={resume}>
+              Carry on
             </Button>
-            <Button variant="text" isDisabled={pending !== null} onPress={skip}>
-              {walk?.next ? "Skip these" : "Skip"}
-            </Button>
-          </div>
-        </>
-      ) : (
-        !finished && (
-          <Button variant="tonal" icon={iconAutoStories} isPending={pending !== null} onPress={() => void look(walk?.next ?? null)}>
-            {walk === null ? "Tidy my library" : `Check ${Math.min(walk.remaining, 10)} more`}
+          )}
+          <Button variant="text" isPending={pending === "discard"} onPress={() => void discard()}>
+            Stop and forget it
           </Button>
-        )
-      )}
-      <p className="text-body-sm text-on-surface-variant" aria-live="polite">
-        {pending === "look" ? describeProgress(progress) : describeWalk(walk, suggestions.length)}
+        </div>
+      </div>
+    );
+  }
+
+  if (suggestions === null) {
+    return (
+      <p id="tidy" className="scroll-mt-24 text-body-sm text-on-surface-variant">
+        Loading what Tidy found…
       </p>
+    );
+  }
+
+  if (suggestions.length === 0) {
+    return (
+      <div id="tidy" className="flex scroll-mt-24 flex-col items-start gap-3">
+        <p className="text-body-sm text-on-surface-variant">{`Tidy looked at ${plural(status.checked, "book")} and found nothing to change.`}</p>
+        <Button variant="tonal" isPending={pending === "discard"} onPress={() => void discard()}>
+          Done
+        </Button>
+      </div>
+    );
+  }
+
+  const busy = pending !== null;
+  return (
+    <div id="tidy" className="flex w-full scroll-mt-24 flex-col items-start gap-3">
+      <p className="text-body-sm text-on-surface-variant">
+        {`Tidy looked at ${plural(status.checked, "book")} and could tidy ${plural(suggestions.length, "of them", "of them")}. The sure ones are ticked; the rest say why to check them first. Each change is checked again against the book as it is now when you apply it.`}
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="text" size="xs" isDisabled={busy} onPress={() => setChosen(new Set(suggestions.map((suggestion) => suggestion.bookId)))}>
+          Tick all
+        </Button>
+        <Button variant="text" size="xs" isDisabled={busy} onPress={() => setChosen(new Set())}>
+          Untick all
+        </Button>
+      </div>
+      <ul aria-label="Suggested fixes" className="flex w-full flex-col gap-2">
+        {suggestions.map((suggestion) => (
+          <li key={suggestion.bookId} className="flex gap-3 rounded-lg bg-surface-container-low p-3">
+            <Checkbox
+              aria-label={suggestion.title}
+              isSelected={chosen.has(suggestion.bookId)}
+              onChange={(selected) => tick(suggestion.bookId, selected)}
+              className="self-start"
+            />
+            <div className="w-12 shrink-0">
+              <BookCover title={suggestion.title} coverUrl={suggestion.patch.coverUrl ?? suggestion.coverUrl} size="sm" />
+            </div>
+            <div className="flex min-w-0 flex-col gap-1">
+              <span className="text-title-sm">{suggestion.title}</span>
+              {!suggestion.sure && <span className="text-label-md text-on-surface-variant">Not certain. Check before applying.</span>}
+              <ul className="flex flex-col gap-0.5 text-body-sm text-on-surface-variant">
+                {describePatch(suggestion).map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="filled" icon={iconCheck} isPending={pending === "apply"} isDisabled={busy || chosen.size === 0} onPress={() => void apply()}>
+          {`Apply ${plural(chosen.size, "change")}`}
+        </Button>
+        <Button variant="text" isPending={pending === "discard"} isDisabled={busy} onPress={() => void discard()}>
+          Discard all
+        </Button>
+      </div>
     </div>
   );
 }
 
-/** Where a batch has got to, as Gemini's answer streams in. */
-function describeProgress(progress: TidyProgress | null): string {
-  if (progress === null || progress.answered === 0) return "Checking the catalogues and asking Gemini about these books…";
-  return `Gemini has answered for ${progress.answered} of ${plural(progress.total, "book")}…`;
-}
-
-function describeWalk(walk: Walk | null, shown: number): string {
-  if (walk === null) {
-    return "Looks through your books 10 at a time and suggests fixes: missing series, tidier titles and author names, covers, and blank details. Titles, authors and series are sent to Google Gemini. You choose what to apply, and nothing you've set is replaced.";
-  }
-  const parts = [`Looked at ${plural(walk.checked, "book")} and tidied ${walk.changed}.`];
-  if (shown > 0) parts.push(`${plural(shown, "book")} in this batch could be tidied; the ones ticked are the sure ones.`);
-  else if (walk.next !== null) parts.push("Nothing to fix in that batch.");
-  if (walk.next !== null) parts.push(`${plural(walk.remaining, "book")} still to look at.`);
-  else if (shown === 0) parts.push("That's every book.");
+/** Where a run has got to, and what the batch being looked at is waiting on. */
+function describeRun(status: TidyRunStatus, progress: TidyProgress | null, paused: string | null): string {
+  const parts = [`Looked at ${status.checked} of ${plural(status.total, "book")} so far, with ${plural(status.found, "fix", "fixes")} found.`];
+  if (paused) parts.push(`Paused: ${paused} Try again when you're ready.`);
+  else if (progress && progress.answered > 0) parts.push(`Gemini has answered for ${progress.answered} of the next ${progress.total}…`);
+  else if (status.error) parts.push("The last batch didn't finish; trying it again shortly.");
+  else parts.push("You can leave this page: it keeps going while the app is open in any tab, and picks up where it stopped if you close it.");
   return parts.join(" ");
 }
 
