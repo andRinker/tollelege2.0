@@ -142,6 +142,7 @@ export function TidyRunChip() {
         : `Tidying: ${status.checked} of ${status.total}`;
   return (
     <Link
+      data-tidy-chip
       href="/settings#tidy"
       className="state-layer focus-ring inline-flex h-8 items-center rounded-full bg-secondary-container px-3 text-label-lg text-on-secondary-container"
     >
