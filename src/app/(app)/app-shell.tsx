@@ -259,7 +259,7 @@ export function AppShell({
 
   return (
     <TidyRunProvider initial={tidyRun}>
-      <div className="min-h-dvh">
+      <div className="group/shell min-h-dvh">
         {actingUntil && <ActingBanner teacher={teacher} until={actingUntil} />}
         <NavigationRail
           destinations={DESTINATIONS}
@@ -288,7 +288,10 @@ export function AppShell({
               <AccountMenu teacher={teacher} isAdmin={isAdmin} acting={actingUntil !== null} />
             </span>
           </header>
-          <main className="mx-auto w-full max-w-[1280px] grow px-4 pb-[calc(96px+env(safe-area-inset-bottom))] medium:-mt-16 medium:px-8 medium:pb-12 expanded:px-12">
+          {/* From medium up the page starts under the transparent top bar, so the Tidy chip
+              there would sit right on top of a page's own buttons; while it shows, the page
+              starts a little lower. */}
+          <main className="mx-auto w-full max-w-[1280px] grow px-4 pb-[calc(96px+env(safe-area-inset-bottom))] medium:-mt-16 medium:px-8 medium:group-has-[[data-tidy-chip]]/shell:-mt-13 medium:pb-12 expanded:px-12">
             {room && (
               <div className="pb-2 medium:pt-20">
                 <ClassroomStrip room={room} />
