@@ -61,7 +61,7 @@ describe("tidying the whole library at one press", () => {
     });
     const options = { fetchFn: noCatalogue, askGemini: gemini.ask };
 
-    expect(await startTidyRun(db, t)).toEqual({ state: "running", checked: 0, total: 12, found: 0, error: null });
+    expect(await startTidyRun(db, t)).toEqual({ state: "running", checked: 0, total: 12, found: 0, filled: 0, error: null });
     const first = await stepTidyRun(db, t, options);
     expect(first.status).toMatchObject({ state: "running", checked: 10, total: 12 });
 
@@ -74,7 +74,7 @@ describe("tidying the whole library at one press", () => {
     // Nothing to review until every book has been looked at.
     expect(await tidyRunSuggestions(db, t)).toEqual([]);
     const last = await stepTidyRun(db, t, options);
-    expect(last.status).toEqual({ state: "ready", checked: 12, total: 12, found: 2, error: null });
+    expect(last.status).toEqual({ state: "ready", checked: 12, total: 12, found: 2, filled: 0, error: null });
     expect(new Set(gemini.asked.flatMap((ask) => ask.titles)).size).toBe(12);
     // A finished run asks nothing more.
     expect((await stepTidyRun(db, t, options)).busy).toBe(false);
@@ -100,11 +100,11 @@ describe("tidying the whole library at one press", () => {
       throw new TidyUnavailableError("Gemini answered 503", "busy");
     };
     await expect(stepTidyRun(db, t, { fetchFn: noCatalogue, askGemini: failing })).rejects.toThrow(TidyUnavailableError);
-    expect(await getTidyRunStatus(db, t)).toEqual({ state: "running", checked: 0, total: 1, found: 0, error: "Gemini answered 503" });
+    expect(await getTidyRunStatus(db, t)).toEqual({ state: "running", checked: 0, total: 1, found: 0, filled: 0, error: "Gemini answered 503" });
 
     // The claim was let go, so the next try goes ahead.
     const retried = await stepTidyRun(db, t, { fetchFn: noCatalogue, askGemini: fakeGemini({}).ask });
-    expect(retried.status).toEqual({ state: "ready", checked: 1, total: 1, found: 0, error: null });
+    expect(retried.status).toEqual({ state: "ready", checked: 1, total: 1, found: 0, filled: 0, error: null });
   });
 
   it("only applies a finished run's own suggestions, to the teacher's own books", async () => {

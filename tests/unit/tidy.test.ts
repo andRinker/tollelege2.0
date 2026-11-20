@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { acceptableCover, sameAuthors, sameTitle, screenSuggestion, stillApplies, type TidyBook } from "@/lib/tidy";
+import { acceptableCover, sameAuthors, sameTitle, screenSuggestion, splitAutomatic, stillApplies, type TidyBook } from "@/lib/tidy";
 
 function book(overrides: Partial<TidyBook> = {}): TidyBook {
   return {
@@ -15,6 +15,9 @@ function book(overrides: Partial<TidyBook> = {}): TidyBook {
     pageCount: 186,
     series: null,
     seriesNumber: null,
+    readingLevel: null,
+    tags: [],
+    genreId: null,
     ...overrides,
   };
 }
@@ -109,5 +112,45 @@ describe("stillApplies", () => {
         coverUrl: "https://example.com/x.jpg",
       }),
     ).toEqual({ title: "The Lion, the Witch and the Wardrobe" });
+  });
+});
+
+describe("genre, reading level and tags", () => {
+  const blank = () => book({ description: null });
+  const gemini = { genre: "fantasy", readingLevel: "790L", tags: ["Friendship", "friendship", "Magic"], sure: true };
+
+  it("offers a genre only from the teacher's own list, spelled as theirs, and only when blank", () => {
+    const found = screenSuggestion(blank(), { gemini, genres: ["Fantasy", "Nonfiction"], readingLevels: true });
+    expect(found?.patch).toMatchObject({ genre: "Fantasy", readingLevel: "790L", tags: ["Friendship", "Magic"] });
+    expect(found?.sources.genre).toBe("gemini");
+    expect(screenSuggestion(blank(), { gemini: { genre: "Cooking" }, genres: ["Fantasy"] })).toBeNull();
+    expect(screenSuggestion(book({ genreId: "g", tags: ["x"], readingLevel: "N" }), { gemini, genres: ["Fantasy"], readingLevels: true })).toBeNull();
+  });
+
+  it("ignores a reading level when the teacher doesn't track them", () => {
+    expect(screenSuggestion(blank(), { gemini: { readingLevel: "790L" }, readingLevels: false })).toBeNull();
+  });
+
+  it("re-checks all three when applying", () => {
+    expect(stillApplies(book({ genreId: "g", tags: ["x"], readingLevel: "N" }), { genre: "Fantasy", tags: ["a"], readingLevel: "M" })).toEqual({});
+    expect(stillApplies(book(), { genre: "Fantasy", tags: ["a"], readingLevel: "M" })).toEqual({ genre: "Fantasy", tags: ["a"], readingLevel: "M" });
+  });
+});
+
+describe("splitAutomatic", () => {
+  it("applies catalogue facts for the ISBN and leaves Gemini's and search matches for review", () => {
+    const suggestion = {
+      bookId: "b",
+      title: "T",
+      authors: [],
+      coverUrl: null,
+      patch: { pageCount: 200, publisher: "Collins", description: "Gemini's", genre: "Fantasy", subtitle: "Found by search" },
+      sources: { pageCount: "catalogue", publisher: "catalogue", description: "gemini", genre: "gemini", subtitle: "search" },
+      sure: false,
+    } as const;
+    const { automatic, review } = splitAutomatic(suggestion as never);
+    expect(automatic).toEqual({ pageCount: 200, publisher: "Collins" });
+    expect(review?.patch).toEqual({ description: "Gemini's", genre: "Fantasy", subtitle: "Found by search" });
+    expect(splitAutomatic({ ...suggestion, patch: { pageCount: 200 }, sources: { pageCount: "catalogue" } } as never).review).toBeNull();
   });
 });

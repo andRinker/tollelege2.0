@@ -92,6 +92,8 @@ export const tidyRuns = pgTable("tidy_runs", {
   remaining: integer("remaining").notNull(),
   /** Every `TidySuggestion` found so far, in the order found. */
   suggestions: jsonb("suggestions").notNull().default([]),
+  /** Books whose catalogue facts were applied automatically as the run went. */
+  filled: integer("filled").notNull().default(0),
   /** Set when every book has been looked at; the run then waits for the teacher's review. */
   finishedAt: timestamp("finished_at", { withTimezone: true }),
   /** A batch is being worked on until then, so a second tab doesn't ask Gemini about it too. */

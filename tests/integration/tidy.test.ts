@@ -187,9 +187,12 @@ describe("tidy my library", () => {
         pageCount: null,
         series: null,
         seriesNumber: null,
+        readingLevel: null,
+        tags: [],
+        genreId: null,
       });
       const progress: number[] = [];
-      const answers = await askGemini([book("A", "1"), book("holes", "2")], { series: [], authors: [] }, fetchFn, (step) =>
+      const answers = await askGemini([book("A", "1"), book("holes", "2")], { series: [], authors: [], genres: [], readingLevelSystem: "none" }, fetchFn, (step) =>
         progress.push(step.answered),
       );
       expect(url).toContain(":streamGenerateContent?alt=sse");
@@ -224,10 +227,13 @@ describe("tidy my library", () => {
         pageCount: null,
         series: null,
         seriesNumber: null,
+        readingLevel: null,
+        tags: [],
+        genreId: null,
       }));
       const answers = await askGemini(
         shelf,
-        { series: [{ name: "The Chronicles of Narnia", books: [{ title: "The Horse and His Boy", number: 3 }] }], authors: ["C. S. Lewis", "Louis Sachar"] },
+        { series: [{ name: "The Chronicles of Narnia", books: [{ title: "The Horse and His Boy", number: 3 }] }], authors: ["C. S. Lewis", "Louis Sachar"], genres: [], readingLevelSystem: "none" },
         fetchFn,
       );
       expect(answers).toEqual([{}, { n: 2, series: "The Chronicles of Narnia", seriesNumber: 2, sure: true }]);

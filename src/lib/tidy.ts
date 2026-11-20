@@ -21,10 +21,13 @@ export type TidyBook = {
   pageCount: number | null;
   series: string | null;
   seriesNumber: number | null;
+  readingLevel: string | null;
+  tags: string[];
+  genreId: string | null;
 };
 
-/** The fields a tidy may fill when blank, beyond title, authors and series. */
-export const FILLABLE = ["subtitle", "description", "coverUrl", "publisher", "publishedYear", "pageCount"] as const;
+/** The fields a tidy may fill when blank, beyond title, authors, series, genre and tags. */
+export const FILLABLE = ["subtitle", "description", "coverUrl", "publisher", "publishedYear", "pageCount", "readingLevel"] as const;
 export type Fillable = (typeof FILLABLE)[number];
 
 /** A change to one book. Only the fields that would change are present. */
@@ -38,10 +41,18 @@ export type TidyPatch = {
   publisher?: string;
   publishedYear?: number;
   pageCount?: number;
+  readingLevel?: string;
+  tags?: string[];
+  /** The name of one of the teacher's genres. */
+  genre?: string;
 };
 
-/** Where a suggested value came from, so the review can say so. */
-export type TidySource = "catalogue" | "gemini";
+/**
+ * Where a suggested value came from, so the review can say so. "catalogue" is what a catalogue
+ * records for the book's own ISBN, and is applied without asking. "search" is a catalogue
+ * record found by title and author, which may be another printing, so it waits for a tick.
+ */
+export type TidySource = "catalogue" | "search" | "gemini";
 
 /** A change a teacher is offered. */
 export type TidySuggestion = {
@@ -63,11 +74,17 @@ export type GeminiAnswer = {
   series?: string | null;
   seriesNumber?: number | null;
   description?: string | null;
+  genre?: string | null;
+  readingLevel?: string | null;
+  tags?: string[] | null;
   sure?: boolean;
 };
 
 /** Catalogue details for the same book: by its ISBN, or a cover from a search by title and author. */
-export type CatalogueFacts = Partial<Pick<TidyBook, Fillable | "authors">>;
+export type CatalogueFacts = Partial<Pick<TidyBook, Exclude<Fillable, "readingLevel"> | "authors">> & {
+  /** Fields that came from a title-and-author search rather than the book's own ISBN. */
+  searched?: (Fillable | "authors")[];
+};
 
 const words = (text: string) =>
   text
@@ -115,7 +132,24 @@ export function acceptableCover(url: string): boolean {
 
 const clean = (text: string) => text.replace(/\s+/g, " ").trim();
 
-const LIMITS = { subtitle: 500, description: 5000, coverUrl: 1000, publisher: 300 } as const;
+const LIMITS = { subtitle: 500, description: 5000, coverUrl: 1000, publisher: 300, readingLevel: 40 } as const;
+
+const MAX_SUGGESTED_TAGS = 5;
+
+/** Short, distinct tags, the way the library's own are kept. */
+function cleanTags(tags: unknown): string[] {
+  if (!Array.isArray(tags)) return [];
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const raw of tags) {
+    if (typeof raw !== "string") continue;
+    const tag = clean(raw).slice(0, 30);
+    if (!tag || seen.has(tag.toLowerCase())) continue;
+    seen.add(tag.toLowerCase());
+    result.push(tag);
+  }
+  return result.slice(0, MAX_SUGGESTED_TAGS);
+}
 
 function fillableValue(field: Fillable, value: unknown): string | number | null {
   if (field === "publishedYear") return typeof value === "number" && Number.isInteger(value) && value > 1000 && value < 3000 ? value : null;
@@ -134,7 +168,13 @@ function fillableValue(field: Fillable, value: unknown): string | number | null 
  */
 export function screenSuggestion(
   book: TidyBook,
-  { catalogue = {}, gemini = {}, knownSeries = [] }: { catalogue?: CatalogueFacts; gemini?: GeminiAnswer; knownSeries?: string[] },
+  {
+    catalogue = {},
+    gemini = {},
+    knownSeries = [],
+    genres = [],
+    readingLevels = false,
+  }: { catalogue?: CatalogueFacts; gemini?: GeminiAnswer; knownSeries?: string[]; genres?: string[]; readingLevels?: boolean },
 ): TidySuggestion | null {
   const patch: TidyPatch = {};
   const sources: TidySuggestion["sources"] = {};
@@ -150,7 +190,7 @@ export function screenSuggestion(
   if (book.authors.length === 0 && listed.length) {
     // A book catalogued without its authors gets the catalogue's for that ISBN, or else Gemini's.
     patch.authors = listed.map((name) => name.slice(0, 200));
-    sources.authors = "catalogue";
+    sources.authors = catalogue.searched?.includes("authors") ? "search" : "catalogue";
   } else if (authors.length && authors.join("|") !== book.authors.join("|") && (book.authors.length === 0 || sameAuthors(book.authors, authors))) {
     patch.authors = authors.map((name) => name.slice(0, 200));
     sources.authors = "gemini";
@@ -169,12 +209,31 @@ export function screenSuggestion(
 
   for (const field of FILLABLE) {
     if (book[field] !== null && book[field] !== "") continue;
-    const fromCatalogue = fillableValue(field, catalogue[field]);
-    const fromGemini = field === "description" ? fillableValue(field, gemini.description) : null;
+    // Nothing in a catalogue says a reading level; and a level is only asked for when the teacher tracks them.
+    const fromCatalogue = field === "readingLevel" ? null : fillableValue(field, catalogue[field]);
+    const geminiValue = field === "description" ? gemini.description : field === "readingLevel" && readingLevels ? gemini.readingLevel : null;
+    const fromGemini = geminiValue === null || geminiValue === undefined ? null : fillableValue(field, geminiValue);
     const value = fromCatalogue ?? fromGemini;
     if (value === null) continue;
     (patch as Record<string, unknown>)[field] = value;
-    sources[field] = fromCatalogue !== null ? "catalogue" : "gemini";
+    sources[field] = fromCatalogue !== null ? (catalogue.searched?.includes(field) ? "search" : "catalogue") : "gemini";
+  }
+
+  if (!book.genreId && gemini.genre) {
+    const wanted = clean(gemini.genre).toLowerCase();
+    const genre = genres.find((name) => name.toLowerCase() === wanted);
+    if (genre) {
+      patch.genre = genre;
+      sources.genre = "gemini";
+    }
+  }
+
+  if (book.tags.length === 0) {
+    const tags = cleanTags(gemini.tags);
+    if (tags.length) {
+      patch.tags = tags;
+      sources.tags = "gemini";
+    }
   }
 
   if (Object.keys(patch).length === 0) return null;
@@ -213,5 +272,38 @@ export function stillApplies(book: TidyBook, patch: TidyPatch): TidyPatch {
     const value = fillableValue(field, patch[field]);
     if (value !== null) (kept as Record<string, unknown>)[field] = value;
   }
+  if (patch.tags && book.tags.length === 0) {
+    const tags = cleanTags(patch.tags);
+    if (tags.length) kept.tags = tags;
+  }
+  if (patch.genre && !book.genreId) {
+    const genre = clean(patch.genre).slice(0, 60);
+    if (genre) kept.genre = genre;
+  }
   return kept;
+}
+
+/**
+ * Splits a suggestion into what is applied without asking and what waits for a tick. Facts a
+ * catalogue records for the book's own ISBN are the record of that printing, so they go in;
+ * everything Gemini said, and anything found by searching, is only ever offered. Null for the
+ * review when nothing is left to ask about.
+ */
+export function splitAutomatic(suggestion: TidySuggestion): { automatic: TidyPatch; review: TidySuggestion | null } {
+  const automatic: Record<string, unknown> = {};
+  const review: Record<string, unknown> = {};
+  const reviewSources: Record<string, TidySource> = {};
+  for (const [field, value] of Object.entries(suggestion.patch)) {
+    const source = suggestion.sources[field as keyof TidyPatch];
+    if (source === "catalogue") automatic[field] = value;
+    else {
+      review[field] = value;
+      if (source) reviewSources[field] = source;
+    }
+  }
+  if (Object.keys(review).length === 0) return { automatic: automatic as TidyPatch, review: null };
+  return {
+    automatic: automatic as TidyPatch,
+    review: { ...suggestion, patch: review as TidyPatch, sources: reviewSources },
+  };
 }
