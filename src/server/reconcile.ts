@@ -2,6 +2,7 @@ import "server-only";
 import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import type { Database } from "@/db/client";
 import { books, metadataChanges } from "@/db/schema";
+import { type LibraryHealth, libraryHealth } from "@/lib/health";
 import { planReconcile, type ReconcileChange, settleSeries } from "@/lib/reconcile";
 
 /**
@@ -95,4 +96,26 @@ export async function resolveSeriesName(db: Database, teacherId: string, name: s
   const known = new Map<string, number>();
   for (const { series } of rows) if (series) known.set(series, (known.get(series) ?? 0) + 1);
   return settleSeries(name, known);
+}
+
+/** How complete and consistent a teacher's library is; see `libraryHealth`. */
+export async function getLibraryHealth(db: Database, teacherId: string, readingLevels: boolean): Promise<LibraryHealth> {
+  const library = await db
+    .select({
+      id: books.id,
+      isbn13: books.isbn13,
+      authors: books.authors,
+      description: books.description,
+      coverUrl: books.coverUrl,
+      publisher: books.publisher,
+      publishedYear: books.publishedYear,
+      pageCount: books.pageCount,
+      readingLevel: books.readingLevel,
+      tags: books.tags,
+      genreId: books.genreId,
+      series: books.series,
+    })
+    .from(books)
+    .where(eq(books.teacherId, teacherId));
+  return libraryHealth(library, { readingLevels });
 }

@@ -110,7 +110,10 @@ export async function discardTidyAction(): Promise<ActionResult<null>> {
 export async function settleSpellingsAction(): Promise<ActionResult<{ batchId: string | null; changed: number }>> {
   const { teacherId } = await requireTeacher();
   const done = await reconcileLibrary(getDb(), teacherId);
-  if (done) revalidatePath("/library");
+  if (done) {
+    revalidatePath("/library");
+    revalidatePath("/settings");
+  }
   return ok({ batchId: done?.batchId ?? null, changed: done?.changed ?? 0 });
 }
 
@@ -121,5 +124,6 @@ export async function undoSettleAction(batchId: unknown): Promise<ActionResult<{
   if (!parsed.success) return fail("That change can't be undone.");
   const result = await undoReconcile(getDb(), teacherId, parsed.data);
   revalidatePath("/library");
+  revalidatePath("/settings");
   return ok(result);
 }

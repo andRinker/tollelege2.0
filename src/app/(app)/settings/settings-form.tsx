@@ -28,6 +28,8 @@ import { shapePath } from "@/ui/shapes/shapes";
 import { DEFAULT_THEME_SEED, THEME_SWATCHES } from "@/ui/theme/constants";
 import { previewTheme } from "@/ui/theme/preview";
 import { FindSeries } from "./find-series";
+import type { LibraryHealth } from "@/lib/health";
+import { LibraryHealthCard } from "./library-health";
 import { SettleSpellings } from "./settle-spellings";
 import { TidyLibrary } from "./tidy-library";
 import { saveSettings, type SettingsPatch } from "./actions";
@@ -86,9 +88,10 @@ type Props = {
   /** Whether "Tidy my library" can run here, which needs Gemini. */
   tidyAvailable: boolean;
   lastSettle: { batchId: string; books: number } | null;
+  health: LibraryHealth;
 };
 
-export function SettingsForm({ settings, teacher, timeZones, tidyAvailable, lastSettle }: Props) {
+export function SettingsForm({ settings, teacher, timeZones, tidyAvailable, lastSettle, health }: Props) {
   const router = useRouter();
   const showSnackbar = useSnackbar();
   const [, startTransition] = useTransition();
@@ -233,6 +236,7 @@ export function SettingsForm({ settings, teacher, timeZones, tidyAvailable, last
           <LinkButton href="/settings/genres" variant="tonal" icon={iconPalette} className="self-start">
             Genres and dot colours
           </LinkButton>
+          <LibraryHealthCard health={health} />
           <FindSeries />
           <SettleSpellings last={lastSettle} />
           {tidyAvailable && <TidyLibrary />}
