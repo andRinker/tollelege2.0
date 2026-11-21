@@ -236,9 +236,9 @@ export function SettingsForm({ settings, teacher, timeZones, tidyAvailable, last
           <LinkButton href="/settings/genres" variant="tonal" icon={iconPalette} className="self-start">
             Genres and dot colours
           </LinkButton>
-          <LibraryHealthCard health={health} />
+          <LibraryHealthCard health={health} tidyAvailable={tidyAvailable} />
           <FindSeries />
-          <SettleSpellings last={lastSettle} />
+          <SettleSpellings key={lastSettle?.batchId ?? "none"} last={lastSettle} />
           {tidyAvailable && <TidyLibrary />}
         </SettingsSection>
 

@@ -94,6 +94,9 @@ export const tidyRuns = pgTable("tidy_runs", {
   suggestions: jsonb("suggestions").notNull().default([]),
   /** Books whose catalogue facts were applied automatically as the run went. */
   filled: integer("filled").notNull().default(0),
+  /** "Fix everything": what Gemini is sure of is applied as the run goes, logged under `batchId` for undo. */
+  confident: boolean("confident").notNull().default(false),
+  batchId: uuid("batch_id"),
   /** Set when every book has been looked at; the run then waits for the teacher's review. */
   finishedAt: timestamp("finished_at", { withTimezone: true }),
   /** A batch is being worked on until then, so a second tab doesn't ask Gemini about it too. */
@@ -112,6 +115,24 @@ export const tidyRuns = pgTable("tidy_runs", {
  * `book_id` is deliberately not a foreign key to books: a composite key into `books` would block
  * a hand-over rewriting `teacher_id`, and a deleted book has nothing left to restore.
  */
+/** The book columns an automatic pass may change and a batch may restore. */
+export const changeFields = [
+  "series",
+  "seriesNumber",
+  "authors",
+  "title",
+  "subtitle",
+  "description",
+  "coverUrl",
+  "publisher",
+  "publishedYear",
+  "pageCount",
+  "readingLevel",
+  "tags",
+  "genreId",
+] as const;
+export type ChangeField = (typeof changeFields)[number];
+
 export const metadataChanges = pgTable("metadata_changes", {
   id: uuid("id").primaryKey().defaultRandom(),
   teacherId: text("teacher_id")
@@ -120,7 +141,7 @@ export const metadataChanges = pgTable("metadata_changes", {
   /** Every change made in one pass shares a batch, and is undone together. */
   batchId: uuid("batch_id").notNull(),
   bookId: uuid("book_id").notNull(),
-  field: text("field", { enum: ["series", "authors"] }).notNull(),
+  field: text("field", { enum: changeFields }).notNull(),
   oldValue: jsonb("old_value").notNull(),
   newValue: jsonb("new_value").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

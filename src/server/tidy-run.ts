@@ -57,7 +57,12 @@ export async function getTidyRunStatus(db: Database, teacherId: string): Promise
 }
 
 /** Starts a run from the first book, replacing any run already going or waiting. */
-export async function startTidyRun(db: Database, teacherId: string): Promise<TidyRunStatus> {
+export async function startTidyRun(
+  db: Database,
+  teacherId: string,
+  /** "Fix everything": apply what Gemini is sure of as the run goes, logged under `batchId`. */
+  options: { confident?: boolean; batchId?: string } = {},
+): Promise<TidyRunStatus> {
   const [{ total }] = await db.select({ total: count() }).from(books).where(eq(books.teacherId, teacherId));
   const fresh = {
     after: null,
@@ -65,6 +70,8 @@ export async function startTidyRun(db: Database, teacherId: string): Promise<Tid
     remaining: total,
     suggestions: [],
     filled: 0,
+    confident: Boolean(options.confident),
+    batchId: options.confident ? (options.batchId ?? crypto.randomUUID()) : null,
     finishedAt: total === 0 ? new Date() : null,
     claimedUntil: null,
     lastError: null,
@@ -121,14 +128,15 @@ export async function stepTidyRun(
 
   // What a catalogue records for a book's own ISBN is filled in now; the rest waits for the teacher.
   const split = batch.suggestions.map(splitAutomatic);
-  const filled = await applyTidy(
-    db,
-    teacherId,
-    split.flatMap(({ automatic }, index) =>
-      Object.keys(automatic).length ? [{ bookId: batch.suggestions[index].bookId, patch: automatic, sources: batch.suggestions[index].sources }] : [],
-    ),
+  const automatic = split.flatMap(({ automatic }, index) =>
+    Object.keys(automatic).length ? [{ bookId: batch.suggestions[index].bookId, patch: automatic, sources: batch.suggestions[index].sources }] : [],
   );
-  const toReview = split.flatMap(({ review }) => (review ? [review] : []));
+  // A "Fix everything" run also applies what Gemini is sure of; only the doubtful wait for a tick.
+  const reviewable = split.flatMap(({ review }) => (review ? [review] : []));
+  const sure = run.confident ? reviewable.filter(isSureEnough) : [];
+  const toReview = run.confident ? reviewable.filter((suggestion) => !isSureEnough(suggestion)) : reviewable;
+  const logTo = run.confident && run.batchId ? { batchId: run.batchId } : {};
+  const filled = await applyTidy(db, teacherId, [...automatic, ...sure.map(({ bookId, patch, sources }) => ({ bookId, patch, sources }))], logTo);
 
   const [saved] = await db
     .update(tidyRuns)
@@ -144,7 +152,14 @@ export async function stepTidyRun(
     })
     .where(thisRun)
     .returning();
+  // The spellings of a whole run are settled once it has looked at every book, under its own batch.
+  if (saved?.finishedAt && run.confident) await reconcileLibrary(db, teacherId, run.batchId ?? undefined);
   return { status: saved ? statusOf(saved) : await getTidyRunStatus(db, teacherId), busy: false };
+}
+
+/** Gemini was certain, and nothing in it came from a title search that may be another printing. */
+function isSureEnough(suggestion: TidySuggestion): boolean {
+  return suggestion.sure && !Object.values(suggestion.sources).includes("search");
 }
 
 /** Everything a finished run found, for the review. Empty while it is still running. */
