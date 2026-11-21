@@ -1,0 +1,1 @@
+ALTER TABLE "books" ADD COLUMN "field_sources" jsonb DEFAULT '{}'::jsonb NOT NULL;

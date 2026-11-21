@@ -5,6 +5,7 @@ import {
   foreignKey,
   index,
   integer,
+  jsonb,
   pgTable,
   real,
   text,
@@ -68,6 +69,8 @@ export const books = pgTable(
     /** Its place in the series. Real, since some series number their in-betweens 1.5. */
     seriesNumber: real("series_number"),
     /** Offered to connected teachers. On by default; turn it off for class sets. */
+    /** Where each field came from (`FieldSources`); a field marked "teacher" is theirs, and automation leaves it alone. */
+    fieldSources: jsonb("field_sources").$type<Record<string, string>>().notNull().default(sql`'{}'::jsonb`),
     lendable: boolean("lendable").notNull().default(true),
     metadataSource: text("metadata_source", { enum: metadataSources })
       .notNull()

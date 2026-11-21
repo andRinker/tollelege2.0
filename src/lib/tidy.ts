@@ -6,6 +6,7 @@
  * - A title or author list may be rewritten only into the same words or the same people.
  * - Every other field is only ever filled when it is blank. Nothing a teacher set is replaced.
  */
+import type { TrackedField } from "./provenance";
 import { looseSeriesKey, parseSeries } from "./series";
 
 export type TidyBook = {
@@ -24,6 +25,8 @@ export type TidyBook = {
   readingLevel: string | null;
   tags: string[];
   genreId: string | null;
+  /** Fields a teacher has set or cleared. Nothing here is filled or rewritten. */
+  locked: TrackedField[];
 };
 
 /** The fields a tidy may fill when blank, beyond title, authors, series, genre and tags. */
@@ -179,7 +182,8 @@ export function screenSuggestion(
   const patch: TidyPatch = {};
   const sources: TidySuggestion["sources"] = {};
 
-  const title = gemini.title ? clean(gemini.title).slice(0, 500) : "";
+  const locked = new Set<string>(book.locked);
+  const title = gemini.title && !locked.has("title") ? clean(gemini.title).slice(0, 500) : "";
   if (title && title !== book.title && sameTitle(book.title, title)) {
     patch.title = title;
     sources.title = "gemini";
@@ -187,7 +191,9 @@ export function screenSuggestion(
 
   const authors = (gemini.authors ?? []).map(clean).filter(Boolean).slice(0, 10);
   const listed = (catalogue.authors ?? []).map(clean).filter(Boolean).slice(0, 10);
-  if (book.authors.length === 0 && listed.length) {
+  if (locked.has("authors")) {
+    // The teacher's authors, as they left them.
+  } else if (book.authors.length === 0 && listed.length) {
     // A book catalogued without its authors gets the catalogue's for that ISBN, or else Gemini's.
     patch.authors = listed.map((name) => name.slice(0, 200));
     sources.authors = catalogue.searched?.includes("authors") ? "search" : "catalogue";
@@ -196,7 +202,7 @@ export function screenSuggestion(
     sources.authors = "gemini";
   }
 
-  if (!book.series && gemini.series) {
+  if (!book.series && gemini.series && !locked.has("series")) {
     const parsed = parseSeries(gemini.series);
     if (parsed) {
       const given = typeof gemini.seriesNumber === "number" && Number.isFinite(gemini.seriesNumber) ? gemini.seriesNumber : null;
@@ -208,7 +214,7 @@ export function screenSuggestion(
   }
 
   for (const field of FILLABLE) {
-    if (book[field] !== null && book[field] !== "") continue;
+    if ((book[field] !== null && book[field] !== "") || locked.has(field)) continue;
     // Nothing in a catalogue says a reading level; and a level is only asked for when the teacher tracks them.
     const fromCatalogue = field === "readingLevel" ? null : fillableValue(field, catalogue[field]);
     const geminiValue = field === "description" ? gemini.description : field === "readingLevel" && readingLevels ? gemini.readingLevel : null;
@@ -219,7 +225,7 @@ export function screenSuggestion(
     sources[field] = fromCatalogue !== null ? (catalogue.searched?.includes(field) ? "search" : "catalogue") : "gemini";
   }
 
-  if (!book.genreId && gemini.genre) {
+  if (!book.genreId && gemini.genre && !locked.has("genreId")) {
     const wanted = clean(gemini.genre).toLowerCase();
     const genre = genres.find((name) => name.toLowerCase() === wanted);
     if (genre) {
@@ -228,7 +234,7 @@ export function screenSuggestion(
     }
   }
 
-  if (book.tags.length === 0) {
+  if (book.tags.length === 0 && !locked.has("tags")) {
     const tags = cleanTags(gemini.tags);
     if (tags.length) {
       patch.tags = tags;
@@ -257,26 +263,27 @@ export function screenSuggestion(
  */
 export function stillApplies(book: TidyBook, patch: TidyPatch): TidyPatch {
   const kept: TidyPatch = {};
-  if (patch.title && sameTitle(book.title, patch.title)) kept.title = clean(patch.title).slice(0, 500);
-  if (patch.authors && (book.authors.length === 0 || sameAuthors(book.authors, patch.authors))) {
+  const locked = new Set<string>(book.locked);
+  if (patch.title && !locked.has("title") && sameTitle(book.title, patch.title)) kept.title = clean(patch.title).slice(0, 500);
+  if (patch.authors && !locked.has("authors") && (book.authors.length === 0 || sameAuthors(book.authors, patch.authors))) {
     const authors = patch.authors.map((name) => clean(name).slice(0, 200)).filter(Boolean).slice(0, 10);
     if (authors.length) kept.authors = authors;
   }
-  if (patch.series && !book.series) {
+  if (patch.series && !book.series && !locked.has("series")) {
     const name = clean(patch.series.name).slice(0, 120);
     const number = patch.series.number;
     if (name) kept.series = { name, number: number !== null && number >= 0 && number <= 9999 ? number : null };
   }
   for (const field of FILLABLE) {
-    if (patch[field] === undefined || (book[field] !== null && book[field] !== "")) continue;
+    if (patch[field] === undefined || locked.has(field) || (book[field] !== null && book[field] !== "")) continue;
     const value = fillableValue(field, patch[field]);
     if (value !== null) (kept as Record<string, unknown>)[field] = value;
   }
-  if (patch.tags && book.tags.length === 0) {
+  if (patch.tags && book.tags.length === 0 && !locked.has("tags")) {
     const tags = cleanTags(patch.tags);
     if (tags.length) kept.tags = tags;
   }
-  if (patch.genre && !book.genreId) {
+  if (patch.genre && !book.genreId && !locked.has("genreId")) {
     const genre = clean(patch.genre).slice(0, 60);
     if (genre) kept.genre = genre;
   }

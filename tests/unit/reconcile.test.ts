@@ -49,3 +49,19 @@ describe("planReconcile", () => {
     expect(planReconcile(library.map((book) => ({ ...book, series: book.series && "The Chronicles of Narnia", authors: book.authors.map((a) => (a.includes("Lewis") && a !== "Lewis Carroll" ? "C. S. Lewis" : a)) })).filter((b) => b.id !== "5"))).toEqual([]);
   });
 });
+
+describe("planReconcile with fields a teacher set", () => {
+  it("settles on the teacher's spelling and never respells their book", () => {
+    const changes = planReconcile([
+      { id: "1", series: "The Chronicles of Narnia", authors: ["C. S. Lewis"] },
+      { id: "2", series: "The Chronicles of Narnia", authors: ["C. S. Lewis"] },
+      { id: "3", series: "Narnia", authors: ["Clive Staples Lewis"], locked: ["series", "authors"] },
+    ]);
+    expect(changes).toEqual([
+      { bookId: "1", field: "series", from: "The Chronicles of Narnia", to: "Narnia" },
+      { bookId: "1", field: "authors", from: ["C. S. Lewis"], to: ["Clive Staples Lewis"] },
+      { bookId: "2", field: "series", from: "The Chronicles of Narnia", to: "Narnia" },
+      { bookId: "2", field: "authors", from: ["C. S. Lewis"], to: ["Clive Staples Lewis"] },
+    ]);
+  });
+});

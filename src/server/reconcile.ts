@@ -3,6 +3,7 @@ import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import type { Database } from "@/db/client";
 import { books, metadataChanges } from "@/db/schema";
 import { type LibraryHealth, libraryHealth } from "@/lib/health";
+import { lockedFields, readSources } from "@/lib/provenance";
 import { planReconcile, type ReconcileChange, settleSeries } from "@/lib/reconcile";
 
 /**
@@ -12,8 +13,11 @@ import { planReconcile, type ReconcileChange, settleSeries } from "@/lib/reconci
  * `undoReconcile` can put it all back. Returns null when there was nothing to settle.
  */
 export async function reconcileLibrary(db: Database, teacherId: string): Promise<{ batchId: string; changed: number } | null> {
-  const library = await db.select({ id: books.id, series: books.series, authors: books.authors }).from(books).where(eq(books.teacherId, teacherId));
-  const changes = planReconcile(library);
+  const rows = await db
+    .select({ id: books.id, series: books.series, authors: books.authors, fieldSources: books.fieldSources })
+    .from(books)
+    .where(eq(books.teacherId, teacherId));
+  const changes = planReconcile(rows.map(({ fieldSources, ...book }) => ({ ...book, locked: lockedFields(readSources(fieldSources)) })));
   if (changes.length === 0) return null;
 
   const batchId = crypto.randomUUID();
@@ -92,10 +96,15 @@ export async function undoReconcile(db: Database, teacherId: string, batchId: st
 
 /** The library's spelling of a series (by `looseSeriesKey`), or the name as given. Used by every write that sets one. */
 export async function resolveSeriesName(db: Database, teacherId: string, name: string): Promise<string> {
-  const rows = await db.select({ series: books.series }).from(books).where(and(eq(books.teacherId, teacherId), isNotNull(books.series)));
+  const rows = await db.select({ series: books.series, fieldSources: books.fieldSources }).from(books).where(and(eq(books.teacherId, teacherId), isNotNull(books.series)));
   const known = new Map<string, number>();
-  for (const { series } of rows) if (series) known.set(series, (known.get(series) ?? 0) + 1);
-  return settleSeries(name, known);
+  const chosen = new Map<string, number>();
+  for (const { series, fieldSources } of rows) {
+    if (!series) continue;
+    known.set(series, (known.get(series) ?? 0) + 1);
+    if (readSources(fieldSources).series === "teacher") chosen.set(series, (chosen.get(series) ?? 0) + 1);
+  }
+  return settleSeries(name, known, chosen);
 }
 
 /** How complete and consistent a teacher's library is; see `libraryHealth`. */
