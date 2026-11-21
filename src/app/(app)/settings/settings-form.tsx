@@ -28,6 +28,7 @@ import { shapePath } from "@/ui/shapes/shapes";
 import { DEFAULT_THEME_SEED, THEME_SWATCHES } from "@/ui/theme/constants";
 import { previewTheme } from "@/ui/theme/preview";
 import { FindSeries } from "./find-series";
+import { SettleSpellings } from "./settle-spellings";
 import { TidyLibrary } from "./tidy-library";
 import { saveSettings, type SettingsPatch } from "./actions";
 import { READING_LEVEL_SYSTEM_LABELS } from "@/lib/reading-levels";
@@ -84,9 +85,10 @@ type Props = {
   timeZones: string[];
   /** Whether "Tidy my library" can run here, which needs Gemini. */
   tidyAvailable: boolean;
+  lastSettle: { batchId: string; books: number } | null;
 };
 
-export function SettingsForm({ settings, teacher, timeZones, tidyAvailable }: Props) {
+export function SettingsForm({ settings, teacher, timeZones, tidyAvailable, lastSettle }: Props) {
   const router = useRouter();
   const showSnackbar = useSnackbar();
   const [, startTransition] = useTransition();
@@ -232,6 +234,7 @@ export function SettingsForm({ settings, teacher, timeZones, tidyAvailable }: Pr
             Genres and dot colours
           </LinkButton>
           <FindSeries />
+          <SettleSpellings last={lastSettle} />
           {tidyAvailable && <TidyLibrary />}
         </SettingsSection>
 
