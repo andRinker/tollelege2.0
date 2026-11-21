@@ -25,15 +25,17 @@ describe("libraryHealth", () => {
         full("2"),
         full("3", { description: null, genreId: null, readingLevel: null, isbn13: null }),
         full("4", { series: "Chronicles of Narnia", authors: ["Clive Staples Lewis"] }),
+        full("5", { tags: [], readingLevel: null, pageCount: null, publisher: null, publishedYear: null }),
       ],
       { readingLevels: true },
     );
-    expect(health.books).toBe(4);
-    expect(health.missing).toMatchObject({ description: 1, genre: 1, readingLevel: 1, cover: 0 });
+    expect(health.books).toBe(5);
+    expect(health.missing).toMatchObject({ description: 1, genre: 1, readingLevel: 2, cover: 0, tags: 1 });
     expect(health.noIsbn).toBe(1);
     expect(health.unsettledSeries).toBe(1);
     expect(health.unsettledAuthors).toBe(1);
-    expect(health.completePercent).toBe(50);
+    // Book 5 lacks only tags, level, pages, publisher and year, which don't hold it back.
+    expect(health.completePercent).toBe(60);
   });
 
   it("ignores reading levels the teacher doesn't track, and an empty library is complete", () => {

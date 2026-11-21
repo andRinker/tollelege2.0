@@ -28,9 +28,17 @@ export type LibraryHealth = {
   /** Books whose series, or authors, would be respelled by "Settle series and author spellings". */
   unsettledSeries: number;
   unsettledAuthors: number;
-  /** Books with nothing missing and nothing unsettled, as a share of the library, 0 to 100. */
+  /**
+   * Books with the fields that make a library sorted and named (author, description, cover and
+   * genre), and one spelling of every series and author, as a share of the library, 0 to 100.
+   * Tags, reading level, pages, publisher and year are counted above but don't hold a book back,
+   * since a catalogue often has none of them and nothing could ever fill them.
+   */
   completePercent: number;
 };
+
+/** The gaps that keep a book from being sorted and named. */
+const CORE: (keyof LibraryHealth["missing"])[] = ["authors", "description", "cover", "genre"];
 
 const blank = (value: string | null) => value === null || value.trim() === "";
 
@@ -56,7 +64,8 @@ export function libraryHealth(library: readonly HealthBook[], { readingLevels }:
     ].filter(Boolean) as (keyof LibraryHealth["missing"])[];
     for (const gap of gaps) (missing[gap] as number) += 1;
     if (!book.isbn13) noIsbn += 1;
-    if (gaps.length === 0 && !unsettledSeries.has(book.id) && !unsettledAuthors.has(book.id)) complete += 1;
+    const core = !gaps.some((gap) => CORE.includes(gap));
+    if (core && !unsettledSeries.has(book.id) && !unsettledAuthors.has(book.id)) complete += 1;
   }
   return {
     books: library.length,

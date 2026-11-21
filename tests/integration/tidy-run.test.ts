@@ -5,6 +5,7 @@ import { books, tidyRuns } from "@/db/schema";
 import type { GeminiAnswer } from "@/lib/tidy";
 import { type BookDetailsInput, createBook } from "@/server/catalog";
 import { type AskGemini, suggestTidyBatch, TidyUnavailableError } from "@/server/tidy";
+import { lastReconcile, undoReconcile } from "@/server/reconcile";
 import { applyTidyRun, discardTidyRun, getTidyRunStatus, startTidyRun, stepTidyRun, tidyRunSuggestions } from "@/server/tidy-run";
 import { createTeacher, createTestDb, type TestDatabase } from "../helpers/test-db";
 
@@ -144,5 +145,48 @@ describe("tidying the whole library at one press", () => {
     });
     expect(gemini.asked[0].series).toEqual(["The Chronicles of Narnia"]);
     expect(gemini.asked[0].authors).toEqual(["Clive Staples Lewis", "C. S. Lewis"]);
+  });
+
+  it("fixes everything: applies what Gemini is sure of, logged for undo, and leaves the doubtful for review", async () => {
+    const t = await createTeacher(db);
+    await createBook(db, t, bookInput({ title: "Sure One", description: null, series: "Chronicles of Narnia", seriesNumber: 1 }));
+    await createBook(db, t, bookInput({ title: "Sure Two", description: null, series: "The Chronicles of Narnia", seriesNumber: 2 }));
+    await createBook(db, t, bookInput({ title: "Doubtful", description: null }));
+    // Books saved before spellings were settled on the way in.
+    await db.update(books).set({ series: "Chronicles of Narnia" }).where(eq(books.title, "Sure One"));
+    await db.update(books).set({ series: "The Chronicles of Narnia" }).where(eq(books.title, "Sure Two"));
+    const gemini = fakeGemini({
+      "Sure One": { description: "A sure blurb.", tags: ["magic"], sure: true },
+      "Sure Two": { series: "Ignored: already set", sure: true },
+      Doubtful: { description: "A guess.", sure: false },
+    });
+    await startTidyRun(db, t, { confident: true });
+    const done = await stepTidyRun(db, t, { fetchFn: noCatalogue, askGemini: gemini.ask });
+    expect(done.status).toMatchObject({ state: "ready", filled: 1, found: 1 });
+
+    const shelf = async () => Object.fromEntries((await db.select().from(books).where(eq(books.teacherId, t))).map((book) => [book.title, book]));
+    let now = await shelf();
+    expect(now["Sure One"]).toMatchObject({ description: "A sure blurb.", tags: ["magic"] });
+    expect(now["Doubtful"].description).toBeNull();
+    // The settle pass at the end of the run joined the two spellings of Narnia.
+    expect(now["Sure One"].series).toBe(now["Sure Two"].series);
+
+    // One undo puts the whole run back, spellings included.
+    const last = await lastReconcile(db, t);
+    expect(last).not.toBeNull();
+    const undone = await undoReconcile(db, t, last!.batchId);
+    expect(undone.restored).toBeGreaterThanOrEqual(3);
+    now = await shelf();
+    expect(now["Sure One"]).toMatchObject({ description: null, tags: [], series: "Chronicles of Narnia" });
+  });
+
+  it("an ordinary run still applies nothing of Gemini's without a tick", async () => {
+    const t = await createTeacher(db);
+    await createBook(db, t, bookInput({ title: "Careful", description: null }));
+    await startTidyRun(db, t);
+    const gemini = fakeGemini({ Careful: { description: "Sure, but ask first.", sure: true } });
+    expect((await stepTidyRun(db, t, { fetchFn: noCatalogue, askGemini: gemini.ask })).status).toMatchObject({ filled: 0, found: 1 });
+    expect((await db.select().from(books).where(eq(books.teacherId, t)))[0].description).toBeNull();
+    expect(await lastReconcile(db, t)).toBeNull();
   });
 });

@@ -1,7 +1,7 @@
 import "server-only";
 import { and, asc, count, eq, gt, inArray, isNotNull } from "drizzle-orm";
 import type { Database } from "@/db/client";
-import { books, genres } from "@/db/schema";
+import { books, changeFields, genres } from "@/db/schema";
 import type { ReadingLevelSystem } from "@/db/schema/enums";
 import { sameSpelling, unifyAuthors } from "@/lib/authors";
 import { lockedFields, readSources, type TrackedField } from "@/lib/provenance";
@@ -18,6 +18,7 @@ import {
 } from "@/lib/tidy";
 import { libraryAuthorSpellings, normalizeTags, setSeriesIfMissing } from "./catalog";
 import { listGenres } from "./genres";
+import { type LoggedChange, logChanges } from "./reconcile";
 import { getTeacherSettings } from "./settings";
 import { lookupIsbn } from "./isbn-lookup";
 import { matchSpine } from "./shelf-scan/match";
@@ -263,6 +264,8 @@ export async function applyTidy(
   db: Database,
   teacherId: string,
   changes: { bookId: string; patch: TidyPatch; sources?: TidySuggestion["sources"] }[],
+  /** When given, every field changed is logged under this batch so it can be undone. */
+  options: { batchId?: string } = {},
 ): Promise<number> {
   if (changes.length === 0) return 0;
   const current = await db
@@ -293,11 +296,23 @@ export async function applyTidy(
       if (id) fields.genreId = id;
     }
     let touched = false;
+    const logged: LoggedChange[] = [];
     if (Object.keys(fields).length > 0) {
       await db.update(books).set(fields).where(and(eq(books.id, book.id), eq(books.teacherId, teacherId)));
       touched = true;
+      for (const field of changeFields) {
+        if (field in fields && field !== "series" && field !== "seriesNumber") {
+          logged.push({ bookId: book.id, field, from: book[field as keyof TidyBook], to: (fields as Record<string, unknown>)[field] });
+        }
+      }
     }
-    if (series && (await setSeriesIfMissing(db, teacherId, book.id, series))) touched = true;
+    const setSeries = series ? await setSeriesIfMissing(db, teacherId, book.id, series) : null;
+    if (setSeries) {
+      touched = true;
+      logged.push({ bookId: book.id, field: "series", from: book.series, to: setSeries.name });
+      logged.push({ bookId: book.id, field: "seriesNumber", from: book.seriesNumber, to: setSeries.number });
+    }
+    if (options.batchId) await logChanges(db, teacherId, options.batchId, logged);
     if (touched) changed += 1;
   }
   return changed;

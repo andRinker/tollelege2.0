@@ -67,11 +67,23 @@ export async function findSeriesAction(
 
 const bookIds = z.array(z.uuid()).max(5000);
 
-/** Starts "Tidy my library" from the first book; the app frame then keeps it going. */
-export async function startTidyAction(): Promise<ActionResult<TidyRunStatus>> {
+/**
+ * Starts "Tidy my library" from the first book; the app frame then keeps it going. With
+ * `fixEverything`, spellings are settled first and what Gemini is sure of is applied as the run
+ * goes, all under one batch the teacher can undo; only the doubtful wait for review.
+ */
+export async function startTidyAction(fixEverything: unknown = false): Promise<ActionResult<TidyRunStatus>> {
   const { teacherId } = await requireTeacher();
+  const parsed = z.boolean().safeParse(fixEverything);
+  if (!parsed.success) return fail("That couldn't be started.");
   if (!tidyConfigured()) return fail("Tidying needs Gemini, which isn't set up here.");
-  return ok(await startTidyRun(getDb(), teacherId));
+  const db = getDb();
+  if (!parsed.data) return ok(await startTidyRun(db, teacherId));
+  const batchId = crypto.randomUUID();
+  await reconcileLibrary(db, teacherId, batchId);
+  const status = await startTidyRun(db, teacherId, { confident: true, batchId });
+  revalidatePath("/library");
+  return ok(status);
 }
 
 /** Where the teacher's run has got to, or null when there is none. */

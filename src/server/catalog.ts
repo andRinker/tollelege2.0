@@ -625,15 +625,15 @@ export async function fillSeries(db: Database, teacherId: string, bookId: string
   if (parsed) await setSeriesIfMissing(db, teacherId, bookId, parsed);
 }
 
-/** Sets a book's series only if it has none, in the library's own spelling of it. True if it was set. */
-export async function setSeriesIfMissing(db: Database, teacherId: string, bookId: string, series: ParsedSeries): Promise<boolean> {
+/** Sets a book's series only if it has none, in the library's own spelling of it. Returns what was set, or null. */
+export async function setSeriesIfMissing(db: Database, teacherId: string, bookId: string, series: ParsedSeries): Promise<ParsedSeries | null> {
   const name = await resolveSeriesName(db, teacherId, series.name);
   const updated = await db
     .update(books)
     .set({ series: name, seriesNumber: series.number })
     .where(and(eq(books.id, bookId), eq(books.teacherId, teacherId), isNull(books.series)))
     .returning({ id: books.id });
-  return updated.length > 0;
+  return updated.length > 0 ? { name, number: series.number } : null;
 }
 
 export async function catalogSummary(db: Database, teacherId: string) {

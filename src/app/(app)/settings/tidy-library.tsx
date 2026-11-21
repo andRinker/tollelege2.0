@@ -49,7 +49,7 @@ export function TidyLibrary() {
 
   async function begin() {
     setPending("start");
-    const problem = await start();
+    const problem = await start(false);
     setPending(null);
     if (problem) showSnackbar({ message: problem });
   }
@@ -191,7 +191,7 @@ export function TidyLibrary() {
 
 /** Where a run has got to, and what the batch being looked at is waiting on. */
 function describeRun(status: TidyRunStatus, progress: TidyProgress | null, paused: string | null): string {
-  const parts = [`Looked at ${status.checked} of ${plural(status.total, "book")} so far, with ${plural(status.found, "fix", "fixes")} to review${status.filled ? ` and catalogue details filled in for ${plural(status.filled, "book")}` : ""}.`];
+  const parts = [`Looked at ${status.checked} of ${plural(status.total, "book")} so far, with ${plural(status.found, "fix", "fixes")} to review${status.filled ? ` and ${plural(status.filled, "book")} fixed automatically` : ""}.`];
   if (paused) parts.push(`Paused: ${paused} Try again when you're ready.`);
   else if (progress && progress.answered > 0) parts.push(`Gemini has answered for ${progress.answered} of the next ${progress.total}…`);
   else if (status.error) parts.push("The last batch didn't finish; trying it again shortly.");

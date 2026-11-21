@@ -24,7 +24,8 @@ type TidyRun = {
   progress: TidyProgress | null;
   /** Set when batches kept failing and the runner stopped trying; `resume` tries again. */
   paused: string | null;
-  start: () => Promise<string | null>;
+  /** Starts a run; with `fixEverything`, spellings are settled first and what Gemini is sure of is applied unasked. */
+  start: (fixEverything?: boolean) => Promise<string | null>;
   resume: () => void;
   /** Forget the run here once it has been applied or discarded. */
   clear: () => void;
@@ -87,10 +88,12 @@ export function TidyRunProvider({ initial, children }: { initial: TidyRunStatus 
         const { status: next, busy } = result.data;
         setStatus(next);
         if (next?.state === "ready") {
+          const fixed = next.filled ? ` It fixed ${plural(next.filled, "book")} on its own.` : "";
+          notify.current.router.refresh();
           notify.current.showSnackbar({
             message: next.found
-              ? `Tidy has looked at every book and has ${plural(next.found, "suggestion")} for you to review.`
-              : "Tidy has looked at every book and found nothing to change.",
+              ? `Tidy has looked at every book.${fixed} ${plural(next.found, "suggestion")} need a look from you.`
+              : `Tidy has looked at every book and found nothing more to change.${fixed}`,
             action: { label: "Review", onAction: () => notify.current.router.push("/settings#tidy") },
             duration: 15_000,
           });
@@ -104,8 +107,8 @@ export function TidyRunProvider({ initial, children }: { initial: TidyRunStatus 
     };
   }, [running, attempt]);
 
-  const start = useCallback(async () => {
-    const result = await startTidyAction();
+  const start = useCallback(async (fixEverything = false) => {
+    const result = await startTidyAction(fixEverything);
     if (!result.ok) return result.message;
     setPaused(null);
     setStatus(result.data);
