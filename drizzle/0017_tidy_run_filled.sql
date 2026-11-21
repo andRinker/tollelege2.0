@@ -1,0 +1,1 @@
+ALTER TABLE "tidy_runs" ADD COLUMN "filled" integer DEFAULT 0 NOT NULL;

@@ -191,7 +191,7 @@ export function TidyLibrary() {
 
 /** Where a run has got to, and what the batch being looked at is waiting on. */
 function describeRun(status: TidyRunStatus, progress: TidyProgress | null, paused: string | null): string {
-  const parts = [`Looked at ${status.checked} of ${plural(status.total, "book")} so far, with ${plural(status.found, "fix", "fixes")} found.`];
+  const parts = [`Looked at ${status.checked} of ${plural(status.total, "book")} so far, with ${plural(status.found, "fix", "fixes")} to review${status.filled ? ` and catalogue details filled in for ${plural(status.filled, "book")}` : ""}.`];
   if (paused) parts.push(`Paused: ${paused} Try again when you're ready.`);
   else if (progress && progress.answered > 0) parts.push(`Gemini has answered for ${progress.answered} of the next ${progress.total}…`);
   else if (status.error) parts.push("The last batch didn't finish; trying it again shortly.");
@@ -200,9 +200,10 @@ function describeRun(status: TidyRunStatus, progress: TidyProgress | null, pause
 }
 
 const GEMINI = " (from Gemini)";
+const SEARCH = " (from a catalogue match by title and author)";
 
 function describePatch({ patch, sources, title, authors }: TidySuggestion): string[] {
-  const from = (field: keyof TidyPatch) => (sources[field] === "gemini" ? GEMINI : "");
+  const from = (field: keyof TidyPatch) => (sources[field] === "gemini" ? GEMINI : sources[field] === "search" ? SEARCH : "");
   const lines: string[] = [];
   if (patch.title) lines.push(`Title: ${title} → ${patch.title}`);
   if (patch.authors) lines.push(authors.length ? `Authors: ${authors.join(", ")} → ${patch.authors.join(", ")}` : `Authors: ${patch.authors.join(", ")}${from("authors")}`);
@@ -210,11 +211,14 @@ function describePatch({ patch, sources, title, authors }: TidySuggestion): stri
     const number = formatSeriesNumber(patch.series.number);
     lines.push(`Series: ${patch.series.name}${number ? `, book ${number}` : ""}`);
   }
-  if (patch.coverUrl) lines.push("Cover: adds the one shown");
-  if (patch.subtitle) lines.push(`Subtitle: ${patch.subtitle}`);
-  if (patch.publisher) lines.push(`Publisher: ${patch.publisher}`);
-  if (patch.publishedYear) lines.push(`Year published: ${patch.publishedYear}`);
-  if (patch.pageCount) lines.push(`Pages: ${patch.pageCount}`);
+  if (patch.genre) lines.push(`Genre${from("genre")}: ${patch.genre}`);
+  if (patch.readingLevel) lines.push(`Reading level${from("readingLevel")}: ${patch.readingLevel}`);
+  if (patch.tags) lines.push(`Tags${from("tags")}: ${patch.tags.join(", ")}`);
+  if (patch.coverUrl) lines.push(`Cover${from("coverUrl")}: adds the one shown`);
+  if (patch.subtitle) lines.push(`Subtitle${from("subtitle")}: ${patch.subtitle}`);
+  if (patch.publisher) lines.push(`Publisher${from("publisher")}: ${patch.publisher}`);
+  if (patch.publishedYear) lines.push(`Year published${from("publishedYear")}: ${patch.publishedYear}`);
+  if (patch.pageCount) lines.push(`Pages${from("pageCount")}: ${patch.pageCount}`);
   if (patch.description) {
     const short = patch.description.length > 160 ? `${patch.description.slice(0, 157)}…` : patch.description;
     lines.push(`Description${from("description")}: ${short}`);

@@ -1,7 +1,8 @@
 import "server-only";
 import { and, asc, count, eq, gt, inArray, isNotNull } from "drizzle-orm";
 import type { Database } from "@/db/client";
-import { books } from "@/db/schema";
+import { books, genres } from "@/db/schema";
+import type { ReadingLevelSystem } from "@/db/schema/enums";
 import { sameSpelling, unifyAuthors } from "@/lib/authors";
 import { seriesKey } from "@/lib/series";
 import {
@@ -14,7 +15,9 @@ import {
   type TidyPatch,
   type TidySuggestion,
 } from "@/lib/tidy";
-import { libraryAuthorSpellings, setSeriesIfMissing } from "./catalog";
+import { libraryAuthorSpellings, normalizeTags, setSeriesIfMissing } from "./catalog";
+import { listGenres } from "./genres";
+import { getTeacherSettings } from "./settings";
 import { lookupIsbn } from "./isbn-lookup";
 import { matchSpine } from "./shelf-scan/match";
 import { countKeys, readGeminiStream, streamUrl } from "./gemini-stream";
@@ -68,6 +71,10 @@ export type LibraryContext = {
   series: KnownSeries[];
   /** Every spelling of an author in the library, the most used first. */
   authors: string[];
+  /** The teacher's genre names; a book may be given one of these and nothing else. */
+  genres: string[];
+  /** How the teacher grades reading levels, or "none" when they don't. */
+  readingLevelSystem: ReadingLevelSystem;
 };
 
 /** How far Gemini has got through a batch, as its answer streams in. */
@@ -93,6 +100,9 @@ const bookFields = {
   pageCount: books.pageCount,
   series: books.series,
   seriesNumber: books.seriesNumber,
+  readingLevel: books.readingLevel,
+  tags: books.tags,
+  genreId: books.genreId,
 };
 
 /**
@@ -150,9 +160,11 @@ export async function suggestTidyBatch(
     for (const name of patch.authors ?? []) if (!knownAuthors.includes(name)) knownAuthors.push(name);
   }
   const fetchFn = options.fetchFn ?? fetch;
+  const genreNames = (await listGenres(db, teacherId)).map((genre) => genre.name);
+  const { readingLevelSystem } = await getTeacherSettings(db, teacherId);
   const [catalogue, answers] = await Promise.all([
     Promise.all(batch.map((book) => catalogueFacts(db, book, options.fetchFn))),
-    (options.askGemini ?? askGemini)(batch, { series: [...known.values()], authors: knownAuthors }, fetchFn, options.onProgress),
+    (options.askGemini ?? askGemini)(batch, { series: [...known.values()], authors: knownAuthors, genres: genreNames, readingLevelSystem }, fetchFn, options.onProgress),
   ]);
 
   const knownNames = [...known.keys()];
@@ -164,7 +176,7 @@ export async function suggestTidyBatch(
     if (gemini.authors) gemini.authors = gemini.authors.map((name) => settleSpelling(name, spellings));
     const facts = { ...catalogue[index] };
     if (facts.authors) facts.authors = unifyAuthors(facts.authors, knownAuthors);
-    const suggestion = screenSuggestion(book, { catalogue: facts, gemini, knownSeries: knownNames });
+    const suggestion = screenSuggestion(book, { catalogue: facts, gemini, knownSeries: knownNames, genres: genreNames, readingLevels: readingLevelSystem !== "none" });
     if (suggestion) suggestions.push(suggestion);
   }
 
@@ -187,26 +199,49 @@ function settleSpelling(name: string, spellings: string[]): string {
  * A catalogue that can't be reached is no facts, never a failed batch.
  */
 async function catalogueFacts(db: Database, book: TidyBook, fetchFn?: typeof fetch): Promise<CatalogueFacts> {
-  const missing = book.authors.length === 0 || FILLABLE.some((field) => book[field] === null || book[field] === "");
+  const missing = book.authors.length === 0 || FILLABLE.some((field) => field !== "readingLevel" && (book[field] === null || book[field] === ""));
   if (!missing) return {};
   const facts: CatalogueFacts = {};
+  const options = fetchFn ? { fetchFn } : {};
   try {
     if (book.isbn13) {
-      const found = await lookupIsbn(db, book.isbn13, fetchFn ? { fetchFn } : {});
-      if (found.status === "found") {
-        const { subtitle, description, coverUrl, publisher, publishedYear, pageCount, authors } = found.metadata;
-        Object.assign(facts, { subtitle, description, coverUrl, publisher, publishedYear, pageCount, authors });
-      }
+      const found = await lookupIsbn(db, book.isbn13, options);
+      if (found.status === "found") Object.assign(facts, factsOf(found.metadata));
     }
-    if (!book.coverUrl && !facts.coverUrl) {
+    if (!book.isbn13 || (!book.coverUrl && !facts.coverUrl)) {
       const match = await matchSpine({ title: book.title, author: book.authors[0] ?? null }, fetchFn);
-      const exact = match.candidates.find((candidate) => candidate.confidence === "exact" && candidate.coverUrl);
-      if (exact) facts.coverUrl = exact.coverUrl;
+      const exact = match.candidates.find((candidate) => candidate.confidence === "exact" && (book.isbn13 ? candidate.coverUrl : true));
+      if (exact && book.isbn13) {
+        facts.coverUrl = exact.coverUrl;
+        facts.searched = ["coverUrl"];
+      } else if (exact) {
+        // No ISBN of its own: the details of the edition the search matched, offered, never applied unasked.
+        const found = await lookupIsbn(db, exact.isbn13, options);
+        const matched = found.status === "found" ? factsOf(found.metadata) : {};
+        if (!matched.coverUrl && exact.coverUrl) matched.coverUrl = exact.coverUrl;
+        Object.assign(facts, matched);
+        facts.searched = Object.keys(matched).filter((key) => (matched as Record<string, unknown>)[key] != null) as CatalogueFacts["searched"];
+      }
     }
   } catch (error) {
     console.warn(`Tidy: catalogue facts unavailable for a book: ${(error as Error).message}`);
   }
   return facts;
+}
+
+function factsOf(metadata: {
+  subtitle?: string | null;
+  description?: string | null;
+  coverUrl?: string | null;
+  publisher?: string | null;
+  publishedYear?: number | null;
+  pageCount?: number | null;
+  authors?: string[];
+}): CatalogueFacts {
+  const { subtitle, description, coverUrl, publisher, publishedYear, pageCount, authors } = metadata;
+  return Object.fromEntries(
+    Object.entries({ subtitle, description, coverUrl, publisher, publishedYear, pageCount, authors }).filter(([, value]) => value != null),
+  ) as CatalogueFacts;
 }
 
 /**
@@ -221,12 +256,19 @@ export async function applyTidy(db: Database, teacherId: string, changes: { book
     .from(books)
     .where(and(eq(books.teacherId, teacherId), inArray(books.id, changes.map((change) => change.bookId))));
   const byId = new Map(current.map((book) => [book.id, book]));
+  const genreIds = new Map((await db.select({ id: genres.id, name: genres.name }).from(genres).where(eq(genres.teacherId, teacherId))).map((genre) => [genre.name.toLowerCase(), genre.id]));
 
   let changed = 0;
   for (const change of changes) {
     const book = byId.get(change.bookId);
     if (!book) continue;
-    const { series, ...fields } = stillApplies(book, change.patch);
+    const { series, genre, tags, ...rest } = stillApplies(book, change.patch);
+    const fields: Partial<typeof books.$inferInsert> = { ...rest };
+    if (tags) fields.tags = normalizeTags(tags);
+    if (genre) {
+      const id = genreIds.get(genre.toLowerCase());
+      if (id) fields.genreId = id;
+    }
     let touched = false;
     if (Object.keys(fields).length > 0) {
       await db.update(books).set(fields).where(and(eq(books.id, book.id), eq(books.teacherId, teacherId)));
@@ -252,6 +294,9 @@ const SCHEMA = {
           series: { type: "STRING", nullable: true },
           seriesNumber: { type: "NUMBER", nullable: true },
           description: { type: "STRING", nullable: true },
+          genre: { type: "STRING", nullable: true },
+          readingLevel: { type: "STRING", nullable: true },
+          tags: { type: "ARRAY", items: { type: "STRING" }, nullable: true },
           sure: { type: "BOOLEAN" },
         },
         required: ["n", "sure"],
@@ -261,7 +306,16 @@ const SCHEMA = {
   required: ["books"],
 } as const;
 
-function prompt(batch: TidyBook[], { series: known, authors }: LibraryContext): string {
+const LEVEL_FORMATS: Record<ReadingLevelSystem, string> = {
+  none: "",
+  lexile: 'a Lexile measure such as "720L"',
+  guided_reading: 'a Fountas & Pinnell Guided Reading letter such as "N"',
+  atos: 'an ATOS book level such as "4.5"',
+  grade_level: 'a grade level such as "3"',
+  other: "a short reading level",
+};
+
+function prompt(batch: TidyBook[], { series: known, authors, genres: genreNames, readingLevelSystem }: LibraryContext): string {
   const lines = batch.map((book, index) =>
     [
       `${index + 1}. Title: ${book.title}`,
@@ -271,6 +325,9 @@ function prompt(batch: TidyBook[], { series: known, authors }: LibraryContext): 
       book.publisher || book.publishedYear ? `   Edition: ${[book.publisher, book.publishedYear].filter(Boolean).join(", ")}` : null,
       `   Series: ${book.series ? `${book.series}${book.seriesNumber !== null ? `, book ${book.seriesNumber}` : ""}` : "(none recorded)"}`,
       book.description ? null : "   Needs a description.",
+      book.genreId || genreNames.length === 0 ? null : "   Needs a genre.",
+      book.readingLevel || readingLevelSystem === "none" ? null : "   Needs a reading level.",
+      book.tags.length ? null : "   Needs tags.",
     ]
       .filter(Boolean)
       .join("\n"),
@@ -291,6 +348,9 @@ function prompt(batch: TidyBook[], { series: known, authors }: LibraryContext): 
 - authors: the authors as their names appear on the book's cover, such as "C. S. Lewis" for "Clive Staples Lewis". The same people in the same order. If no authors are recorded, give them. Every book by one person must name them the same way: if the library already spells an author the way their covers do (listed below), use exactly that spelling, and give it for every book by them that is spelled any other way.
 - series and seriesNumber: only for a book whose series is "(none recorded)". The series it belongs to as readers know it, and its place in that series. If the library already has books in that series (listed below), use the library's name for the series and number the book the same way those books are numbered. Null if the book isn't part of a series.
 - description: only for a book marked "Needs a description": two or three plain sentences saying what the book is about, suitable for a school library and without spoilers.
+- genre: only for a book marked "Needs a genre". Exactly one of the library's own genres, spelled as listed, and only if one clearly fits; null if none does. The genres are: ${genreNames.join("; ") || "(none)"}.
+- readingLevel: only for a book marked "Needs a reading level"${readingLevelSystem === "none" ? "" : `, ${LEVEL_FORMATS[readingLevelSystem]}`}. Only if you actually know this book's level; null otherwise, never an estimate from the title alone.
+- tags: only for a book marked "Needs tags": up to five short themes or topics readers would search by, such as "friendship" or "World War II". No genres and no ages.
 - sure: true only if you are certain of every field you gave. A book you don't recognise gets nulls and sure false. Never guess.
 
 Books:

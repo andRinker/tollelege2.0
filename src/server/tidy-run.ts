@@ -2,7 +2,7 @@ import "server-only";
 import { and, count, eq, isNull, lt, or, sql } from "drizzle-orm";
 import type { Database } from "@/db/client";
 import { books, tidyRuns } from "@/db/schema";
-import type { TidySuggestion } from "@/lib/tidy";
+import { splitAutomatic, type TidySuggestion } from "@/lib/tidy";
 import { type AskGemini, applyTidy, suggestTidyBatch, type TidyProgress } from "./tidy";
 
 /**
@@ -19,6 +19,8 @@ export type TidyRunStatus = {
   /** Books in the library when the last batch was looked at: checked plus remaining. */
   total: number;
   found: number;
+  /** Books whose catalogue facts were filled in as the run went, without asking. */
+  filled: number;
   /** Why the last batch failed, until one succeeds. */
   error: string | null;
 };
@@ -38,6 +40,7 @@ function statusOf(run: typeof tidyRuns.$inferSelect): TidyRunStatus {
     checked: run.checked,
     total: run.checked + run.remaining,
     found: (run.suggestions as TidySuggestion[]).length,
+    filled: run.filled,
     error: run.lastError,
   };
 }
@@ -60,6 +63,7 @@ export async function startTidyRun(db: Database, teacherId: string): Promise<Tid
     checked: 0,
     remaining: total,
     suggestions: [],
+    filled: 0,
     finishedAt: total === 0 ? new Date() : null,
     claimedUntil: null,
     lastError: null,
@@ -114,13 +118,23 @@ export async function stepTidyRun(
     throw error;
   }
 
+  // What a catalogue records for a book's own ISBN is filled in now; the rest waits for the teacher.
+  const split = batch.suggestions.map(splitAutomatic);
+  const filled = await applyTidy(
+    db,
+    teacherId,
+    split.flatMap(({ automatic }, index) => (Object.keys(automatic).length ? [{ bookId: batch.suggestions[index].bookId, patch: automatic }] : [])),
+  );
+  const toReview = split.flatMap(({ review }) => (review ? [review] : []));
+
   const [saved] = await db
     .update(tidyRuns)
     .set({
       after: batch.next ?? run.after,
       checked: run.checked + batch.checked,
       remaining: batch.remaining,
-      suggestions: [...found, ...batch.suggestions],
+      suggestions: [...found, ...toReview],
+      filled: run.filled + filled,
       finishedAt: batch.next === null ? new Date() : null,
       claimedUntil: null,
       lastError: null,

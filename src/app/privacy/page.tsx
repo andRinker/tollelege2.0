@@ -178,10 +178,12 @@ export default function PrivacyPage() {
         {usesShelfPhotos && (
           <Section title="Tidying your library">
             <p>
-              &ldquo;Tidy my library&rdquo; in Settings sends the titles, subtitles, authors, ISBNs, publishers, years and series
-              of your books to Google&rsquo;s Gemini service, ten at a time, which suggests missing series, tidier titles and
-              author names, and short descriptions. It also looks your books up in the catalogues above, by ISBN or by title and
-              author. Nothing about your students, classes or checkouts is sent, and nothing changes until you choose which
+              &ldquo;Tidy my library&rdquo; in Settings sends the titles, subtitles, authors, ISBNs, publishers, years, series,
+              tags and reading levels of your books, with the names of your genres, to Google&rsquo;s Gemini service, ten at a
+              time, which suggests missing series, tidier titles and author names, genres, reading levels, tags and short
+              descriptions. It also looks your books up in the catalogues above, by ISBN or by title and author. Nothing about
+              your students, classes or checkouts is sent. Details the catalogues record for a book&rsquo;s own ISBN, such as
+              its page count, publisher and cover, are filled in where blank; everything else waits until you choose which
               suggestions to apply. What Google does with what it receives is covered by their own privacy terms.
             </p>
           </Section>
