@@ -124,7 +124,9 @@ export async function stepTidyRun(
   const filled = await applyTidy(
     db,
     teacherId,
-    split.flatMap(({ automatic }, index) => (Object.keys(automatic).length ? [{ bookId: batch.suggestions[index].bookId, patch: automatic }] : [])),
+    split.flatMap(({ automatic }, index) =>
+      Object.keys(automatic).length ? [{ bookId: batch.suggestions[index].bookId, patch: automatic, sources: batch.suggestions[index].sources }] : [],
+    ),
   );
   const toReview = split.flatMap(({ review }) => (review ? [review] : []));
 
@@ -161,7 +163,7 @@ export async function applyTidyRun(db: Database, teacherId: string, bookIds: str
   const chosen = new Set(bookIds);
   const changes = (run.suggestions as TidySuggestion[])
     .filter((suggestion) => chosen.has(suggestion.bookId))
-    .map(({ bookId, patch }) => ({ bookId, patch }));
+    .map(({ bookId, patch, sources }) => ({ bookId, patch, sources }));
   const changed = await applyTidy(db, teacherId, changes);
   await discardTidyRun(db, teacherId);
   // Spellings Gemini or a catalogue gave one book at a time are settled across the library, logged for undo.

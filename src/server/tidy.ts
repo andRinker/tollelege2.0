@@ -4,6 +4,7 @@ import type { Database } from "@/db/client";
 import { books, genres } from "@/db/schema";
 import type { ReadingLevelSystem } from "@/db/schema/enums";
 import { sameSpelling, unifyAuthors } from "@/lib/authors";
+import { lockedFields, readSources, type TrackedField } from "@/lib/provenance";
 import { looseSeriesKey } from "@/lib/series";
 import {
   type CatalogueFacts,
@@ -103,7 +104,13 @@ const bookFields = {
   readingLevel: books.readingLevel,
   tags: books.tags,
   genreId: books.genreId,
+  fieldSources: books.fieldSources,
 };
+
+/** A selected row as a `TidyBook`: the fields a teacher has set become its locks. */
+function tidyBook<Row extends { fieldSources: unknown }>({ fieldSources, ...book }: Row): Omit<Row, "fieldSources"> & { locked: TrackedField[] } {
+  return { ...book, locked: lockedFields(readSources(fieldSources)) };
+}
 
 /**
  * Looks at the next batch of a teacher's books, in id order from `after`, and proposes fixes:
@@ -128,12 +135,12 @@ export async function suggestTidyBatch(
   } = {},
 ): Promise<TidyBatch> {
   const mine = eq(books.teacherId, teacherId);
-  const batch: TidyBook[] = await db
+  const batch: TidyBook[] = (await db
     .select(bookFields)
     .from(books)
     .where(and(mine, options.after ? gt(books.id, options.after) : undefined))
     .orderBy(asc(books.id))
-    .limit(TIDY_BATCH);
+    .limit(TIDY_BATCH)).map(tidyBook);
   if (batch.length === 0) return { checked: 0, suggestions: [], remaining: 0, next: null };
 
   const seriesRows = await db
@@ -199,7 +206,10 @@ function settleSpelling(name: string, spellings: string[]): string {
  * A catalogue that can't be reached is no facts, never a failed batch.
  */
 async function catalogueFacts(db: Database, book: TidyBook, fetchFn?: typeof fetch): Promise<CatalogueFacts> {
-  const missing = book.authors.length === 0 || FILLABLE.some((field) => field !== "readingLevel" && (book[field] === null || book[field] === ""));
+  const open = (field: TrackedField) => !book.locked.includes(field);
+  const missing =
+    (book.authors.length === 0 && open("authors")) ||
+    FILLABLE.some((field) => field !== "readingLevel" && open(field) && (book[field] === null || book[field] === ""));
   if (!missing) return {};
   const facts: CatalogueFacts = {};
   const options = fetchFn ? { fetchFn } : {};
@@ -249,21 +259,34 @@ function factsOf(metadata: {
  * so a book edited since the suggestion was made keeps its edits, and the rules in
  * `src/lib/tidy.ts` hold however the request was made. Returns how many books changed.
  */
-export async function applyTidy(db: Database, teacherId: string, changes: { bookId: string; patch: TidyPatch }[]): Promise<number> {
+export async function applyTidy(
+  db: Database,
+  teacherId: string,
+  changes: { bookId: string; patch: TidyPatch; sources?: TidySuggestion["sources"] }[],
+): Promise<number> {
   if (changes.length === 0) return 0;
   const current = await db
     .select(bookFields)
     .from(books)
     .where(and(eq(books.teacherId, teacherId), inArray(books.id, changes.map((change) => change.bookId))));
-  const byId = new Map(current.map((book) => [book.id, book]));
+  const byId = new Map(current.map((row) => [row.id, { book: tidyBook(row), sources: readSources(row.fieldSources) }]));
   const genreIds = new Map((await db.select({ id: genres.id, name: genres.name }).from(genres).where(eq(genres.teacherId, teacherId))).map((genre) => [genre.name.toLowerCase(), genre.id]));
 
   let changed = 0;
   for (const change of changes) {
-    const book = byId.get(change.bookId);
-    if (!book) continue;
-    const { series, genre, tags, ...rest } = stillApplies(book, change.patch);
+    const found = byId.get(change.bookId);
+    if (!found) continue;
+    const { book, sources } = found;
+    const kept = stillApplies(book, change.patch);
+    const { series, genre, tags, ...rest } = kept;
     const fields: Partial<typeof books.$inferInsert> = { ...rest };
+    // Remember who said each field, so the card can say so and a later pass knows it wasn't the teacher.
+    const origin: Record<string, string> = { ...sources };
+    for (const key of Object.keys(kept) as (keyof TidyPatch)[]) {
+      const source = change.sources?.[key];
+      if (source) origin[key === "genre" ? "genreId" : key] = source;
+    }
+    if (Object.keys(kept).length > 0) fields.fieldSources = origin;
     if (tags) fields.tags = normalizeTags(tags);
     if (genre) {
       const id = genreIds.get(genre.toLowerCase());

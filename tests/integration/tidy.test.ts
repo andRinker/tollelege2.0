@@ -190,6 +190,7 @@ describe("tidy my library", () => {
         readingLevel: null,
         tags: [],
         genreId: null,
+        locked: [],
       });
       const progress: number[] = [];
       const answers = await askGemini([book("A", "1"), book("holes", "2")], { series: [], authors: [], genres: [], readingLevelSystem: "none" }, fetchFn, (step) =>
@@ -230,6 +231,7 @@ describe("tidy my library", () => {
         readingLevel: null,
         tags: [],
         genreId: null,
+        locked: [],
       }));
       const answers = await askGemini(
         shelf,

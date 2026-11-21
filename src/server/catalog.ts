@@ -4,7 +4,8 @@ import { books, type CopyStatus, copies, type GenreColor, genres, loans, type Me
 import { unifyAuthors } from "@/lib/authors";
 import { normalizeIsbn } from "@/lib/isbn";
 import { type ParsedSeries, parseSeries, seriesKey } from "@/lib/series";
-import { resolveSeriesName } from "./reconcile";
+import { changedFields } from "@/lib/provenance";
+import { reconcileLibrary, resolveSeriesName } from "./reconcile";
 import { renumberCopies } from "./copy-numbers";
 import { inScope } from "./coteaching";
 import { assertGenreOwned } from "./genres";
@@ -228,24 +229,51 @@ export async function undoQuickAdd(db: Database, teacherId: string, copyId: stri
   });
 }
 
+/**
+ * A teacher's edit. Whatever it changes becomes the teacher's (`fieldSources`), so no automatic
+ * pass fills, rewrites or respells it afterwards, and their spelling of a series or author is the
+ * one the rest of the library settles on: renaming one book renames the series. The settle pass
+ * runs at once when a series or authors changed, and is logged so it can be undone.
+ */
 export async function updateBookDetails(db: Database, teacherId: string, bookId: string, input: Partial<BookDetailsInput>) {
   const values = input.tags ? { ...input, tags: normalizeTags(input.tags) } : { ...input };
-  if (values.series) values.series = await resolveSeriesName(db, teacherId, values.series);
   if (input.genreId !== undefined) await assertGenreOwned(db, teacherId, input.genreId);
+  const [current] = await db
+    .select({ ...bookEditable, fieldSources: books.fieldSources })
+    .from(books)
+    .where(and(eq(books.id, bookId), eq(books.teacherId, teacherId)));
+  if (!current) throw new NotFoundError("That book isn't in your library.");
+  const changed = changedFields(current, values);
+  const fieldSources: Record<string, string> = { ...current.fieldSources };
+  for (const field of changed) fieldSources[field] = "teacher";
   try {
-    const updated = await db
+    await db
       .update(books)
-      .set(values)
-      .where(and(eq(books.id, bookId), eq(books.teacherId, teacherId)))
-      .returning({ id: books.id });
-    if (updated.length === 0) throw new NotFoundError("That book isn't in your library.");
+      .set(changed.length > 0 ? { ...values, fieldSources } : values)
+      .where(and(eq(books.id, bookId), eq(books.teacherId, teacherId)));
   } catch (error) {
     if (isUniqueViolation(error, "books_teacher_isbn_unique")) {
       throw new ConflictError("Another book in your library already has that ISBN.");
     }
     throw error;
   }
+  if (changed.includes("series") || changed.includes("authors")) await reconcileLibrary(db, teacherId);
 }
+
+const bookEditable = {
+  title: books.title,
+  subtitle: books.subtitle,
+  authors: books.authors,
+  description: books.description,
+  coverUrl: books.coverUrl,
+  publisher: books.publisher,
+  publishedYear: books.publishedYear,
+  pageCount: books.pageCount,
+  readingLevel: books.readingLevel,
+  tags: books.tags,
+  series: books.series,
+  genreId: books.genreId,
+};
 
 export async function deleteBook(db: Database, teacherId: string, bookId: string): Promise<void> {
   await db.transaction(async (tx) => {
@@ -777,9 +805,11 @@ export async function bulkUpdateBooks(db: Database, teacherId: string, bookIds: 
   const ids = [...new Set(bookIds)].slice(0, MAX_BULK_BOOKS);
   if (ids.length === 0 || Object.keys(patch).length === 0) return 0;
   if (patch.genreId !== undefined) await assertGenreOwned(db, teacherId, patch.genreId);
+  // A bulk genre or level is the teacher's own call, so it is theirs against later automation too.
+  const owned = JSON.stringify(Object.fromEntries(Object.keys(patch).filter((key) => key === "genreId" || key === "readingLevel").map((key) => [key, "teacher"])));
   const updated = await db
     .update(books)
-    .set(patch)
+    .set({ ...patch, fieldSources: sql`${books.fieldSources} || ${owned}::jsonb` })
     .where(and(eq(books.teacherId, teacherId), inArray(books.id, ids)))
     .returning({ id: books.id });
   return updated.length;

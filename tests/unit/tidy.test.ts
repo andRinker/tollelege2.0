@@ -18,6 +18,7 @@ function book(overrides: Partial<TidyBook> = {}): TidyBook {
     readingLevel: null,
     tags: [],
     genreId: null,
+    locked: [],
     ...overrides,
   };
 }
@@ -152,5 +153,19 @@ describe("splitAutomatic", () => {
     expect(automatic).toEqual({ pageCount: 200, publisher: "Collins" });
     expect(review?.patch).toEqual({ description: "Gemini's", genre: "Fantasy", subtitle: "Found by search" });
     expect(splitAutomatic({ ...suggestion, patch: { pageCount: 200 }, sources: { pageCount: "catalogue" } } as never).review).toBeNull();
+  });
+});
+
+describe("fields a teacher has set", () => {
+  const gemini = { title: "The Lion, the Witch and the Wardrobe", description: "A blurb.", genre: "Fantasy", tags: ["magic"], sure: true };
+
+  it("are never suggested, even when blank", () => {
+    const blank = book({ description: null, locked: ["description", "title", "genreId", "tags"] });
+    expect(screenSuggestion(blank, { gemini, genres: ["Fantasy"] })).toBeNull();
+    expect(screenSuggestion(book({ description: null }), { gemini, genres: ["Fantasy"] })?.patch.description).toBe("A blurb.");
+  });
+
+  it("are never applied, even from a suggestion made before the edit", () => {
+    expect(stillApplies(book({ description: null, locked: ["description"] }), { description: "A blurb." })).toEqual({});
   });
 });
