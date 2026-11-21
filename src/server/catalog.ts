@@ -4,6 +4,7 @@ import { books, type CopyStatus, copies, type GenreColor, genres, loans, type Me
 import { unifyAuthors } from "@/lib/authors";
 import { normalizeIsbn } from "@/lib/isbn";
 import { type ParsedSeries, parseSeries, seriesKey } from "@/lib/series";
+import { resolveSeriesName } from "./reconcile";
 import { renumberCopies } from "./copy-numbers";
 import { inScope } from "./coteaching";
 import { assertGenreOwned } from "./genres";
@@ -72,11 +73,13 @@ export async function createBook(
   await assertGenreOwned(db, teacherId, input.genreId ?? null);
   // A catalogue's "Clive Staples Lewis" joins the library's "C. S. Lewis" rather than starting a second spelling.
   const authors = unifyAuthors(input.authors, await libraryAuthorSpellings(db, teacherId));
+  // Likewise a catalogue's "Chronicles of Narnia" takes the library's "The Chronicles of Narnia".
+  const series = input.series ? await resolveSeriesName(db, teacherId, input.series) : input.series;
   try {
     return await db.transaction(async (tx) => {
       const [book] = await tx
         .insert(books)
-        .values({ ...input, authors, teacherId, tags: normalizeTags(input.tags) })
+        .values({ ...input, authors, series, teacherId, tags: normalizeTags(input.tags) })
         .returning({ id: books.id });
       const inserted = await tx
         .insert(copies)
@@ -226,7 +229,8 @@ export async function undoQuickAdd(db: Database, teacherId: string, copyId: stri
 }
 
 export async function updateBookDetails(db: Database, teacherId: string, bookId: string, input: Partial<BookDetailsInput>) {
-  const values = input.tags ? { ...input, tags: normalizeTags(input.tags) } : input;
+  const values = input.tags ? { ...input, tags: normalizeTags(input.tags) } : { ...input };
+  if (values.series) values.series = await resolveSeriesName(db, teacherId, values.series);
   if (input.genreId !== undefined) await assertGenreOwned(db, teacherId, input.genreId);
   try {
     const updated = await db
@@ -595,11 +599,7 @@ export async function fillSeries(db: Database, teacherId: string, bookId: string
 
 /** Sets a book's series only if it has none, in the library's own spelling of it. True if it was set. */
 export async function setSeriesIfMissing(db: Database, teacherId: string, bookId: string, series: ParsedSeries): Promise<boolean> {
-  const known = await db
-    .selectDistinct({ series: books.series })
-    .from(books)
-    .where(and(eq(books.teacherId, teacherId), isNotNull(books.series)));
-  const name = known.find((row) => seriesKey(row.series!) === seriesKey(series.name))?.series ?? series.name;
+  const name = await resolveSeriesName(db, teacherId, series.name);
   const updated = await db
     .update(books)
     .set({ series: name, seriesNumber: series.number })

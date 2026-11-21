@@ -80,6 +80,14 @@ The library's **Select** mode (`library-books.tsx`) picks books by hand, by page
 - Names saved before spelled-out places were read kept them ("…, Book Three"), so each such book was its own series and never stacked. Migration 0015 moved the word into `series_number`; its word list must match `NUMBER_WORDS` in `series.ts`.
 - Answers cached before series were read have no `series` key. Treat it as unknown, not as "no series"; that is what "Find series" is for.
 
+### One spelling per series and author
+
+A series is free text on each book, so the same series arrives under several spellings ("Narnia", "Chronicles of Narnia", "The Chronicles of Narnia Series"). **`looseSeriesKey`** (`src/lib/series.ts`) is `seriesKey` minus dressing words (series, saga, chronicles, of, the, and "&" read as "and"), and is the rule for "same series" when *settling* a name against the library; "Beyond the Spiderwick Chronicles" stays apart from "The Spiderwick Chronicles" because "Beyond" names something. `seriesKey`/`seriesKeySql` still do the grouping, so they stay in step as before; settling makes every book of a series wear one spelling, so their keys agree.
+
+- **Every write that sets a series settles it first** (`resolveSeriesName` in `src/server/reconcile.ts`: `createBook`, `updateBookDetails`, `setSeriesIfMissing`, and Tidy's own name matching), to the library's most-used spelling. Authors already did this (`unifyAuthors`).
+- **Settings → "Settle series and author spellings"** (`reconcileLibrary`, rules in `src/lib/reconcile.ts`) fixes what was saved before, and runs after a Tidy run is applied. It only joins spellings that `looseSeriesKey` / `samePerson` say are the same, so it applies without asking. Every change is logged in `metadata_changes` by batch; **Undo** restores a batch, field by field, except where the book has been edited since. `metadata_changes.book_id` has no foreign key to `books` on purpose: a composite key would block a hand-over rewriting `teacher_id`.
+- **Known limit:** editing a book's series to another spelling of the same series is settled back to the library's, so a series can't be renamed by changing its spelling alone, only to a different name.
+
 ## Tidy my library
 
 Settings → "Tidy my library" (`src/server/tidy.ts`, shown only with `GEMINI_API_KEY`) looks at every book at one press and **only suggests**: the teacher ticks what to apply once every book has been looked at, and doubtful suggestions start unticked, for the same reason shelf photos are confirmed. Each batch of 10 is the catalogues for each book's ISBN (`lookupIsbn`), a title-and-author search for a cover where there's none (an `exact` `matchSpine` candidate), and one Gemini request for the batch asking for a missing series (numbered like the library's own books of that series, which the prompt lists), the title as published, authors as their covers name them, and a description where there's none.

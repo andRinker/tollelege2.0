@@ -68,3 +68,22 @@ export function formatSeriesNumber(number: number | null | undefined): string {
   if (number === null || number === undefined) return "";
   return Number.isInteger(number) ? String(number) : String(Math.round(number * 100) / 100);
 }
+
+/** Words that dress a series name without naming it: "Narnia" and "The Chronicles of Narnia" are one series. */
+const GENERIC = new Set([
+  "a", "an", "the", "of", "and", "series", "saga", "trilogy", "quartet", "quintet", "books", "book", "novels", "collection", "cycle",
+  "chronicles", "tales", "stories", "adventures",
+]);
+
+/**
+ * What two spellings of one series have in common once the dressing is gone: `seriesKey`, minus
+ * words like "Series", "Chronicles of" and "The", with "&" read as "and". "Chronicles of Narnia",
+ * "The Chronicles of Narnia" and "Narnia" are one series; "Beyond the Spiderwick Chronicles" is
+ * not "The Spiderwick Chronicles", since "Beyond" names something. A name made only of dressing
+ * keeps its plain key. Used to settle a name against the library's own, never in SQL.
+ */
+export function looseSeriesKey(name: string): string {
+  const plain = seriesKey(name.replace(/&/g, " and "));
+  const kept = plain.split(" ").filter((word) => word && !GENERIC.has(word));
+  return kept.length > 0 ? kept.join(" ") : plain;
+}

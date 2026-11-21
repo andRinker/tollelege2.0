@@ -3,6 +3,7 @@ import { and, count, eq, isNull, lt, or, sql } from "drizzle-orm";
 import type { Database } from "@/db/client";
 import { books, tidyRuns } from "@/db/schema";
 import { splitAutomatic, type TidySuggestion } from "@/lib/tidy";
+import { reconcileLibrary } from "./reconcile";
 import { type AskGemini, applyTidy, suggestTidyBatch, type TidyProgress } from "./tidy";
 
 /**
@@ -163,6 +164,8 @@ export async function applyTidyRun(db: Database, teacherId: string, bookIds: str
     .map(({ bookId, patch }) => ({ bookId, patch }));
   const changed = await applyTidy(db, teacherId, changes);
   await discardTidyRun(db, teacherId);
+  // Spellings Gemini or a catalogue gave one book at a time are settled across the library, logged for undo.
+  await reconcileLibrary(db, teacherId);
   return changed;
 }
 

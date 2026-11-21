@@ -4,7 +4,7 @@ import type { Database } from "@/db/client";
 import { books, genres } from "@/db/schema";
 import type { ReadingLevelSystem } from "@/db/schema/enums";
 import { sameSpelling, unifyAuthors } from "@/lib/authors";
-import { seriesKey } from "@/lib/series";
+import { looseSeriesKey } from "@/lib/series";
 import {
   type CatalogueFacts,
   FILLABLE,
@@ -149,7 +149,7 @@ export async function suggestTidyBatch(
   }
   for (const { title, patch } of options.pending ?? []) {
     if (!patch.series) continue;
-    const name = [...known.keys()].find((existing) => seriesKey(existing) === seriesKey(patch.series!.name)) ?? patch.series.name;
+    const name = [...known.keys()].find((existing) => looseSeriesKey(existing) === looseSeriesKey(patch.series!.name)) ?? patch.series.name;
     const entry = known.get(name) ?? { name, books: [] };
     entry.books.push({ title: patch.title ?? title, number: patch.series.number });
     known.set(name, entry);

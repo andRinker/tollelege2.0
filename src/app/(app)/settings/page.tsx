@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { getDb } from "@/db/client";
+import { lastReconcile } from "@/server/reconcile";
 import { requireTeacher } from "@/server/session";
 import { tidyConfigured } from "@/server/tidy";
 import { getRequestSettings } from "@/server/theme";
@@ -12,12 +14,13 @@ export const maxDuration = 120;
 export default async function SettingsPage() {
   const teacher = await requireTeacher();
   const settings = await getRequestSettings();
+  const last = await lastReconcile(getDb(), teacher.teacherId);
   const timeZones = Intl.supportedValuesOf("timeZone");
 
   return (
     <>
       <PageHeader title="Settings" subtitle="Changes save as you make them." />
-      <SettingsForm settings={settings} teacher={{ name: teacher.name, email: teacher.email }} timeZones={timeZones} tidyAvailable={tidyConfigured()} />
+      <SettingsForm settings={settings} teacher={{ name: teacher.name, email: teacher.email }} timeZones={timeZones} tidyAvailable={tidyConfigured()} lastSettle={last && { batchId: last.batchId, books: last.books }} />
     </>
   );
 }

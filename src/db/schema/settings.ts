@@ -106,3 +106,23 @@ export const tidyRuns = pgTable("tidy_runs", {
     .defaultNow()
     .$onUpdate(() => new Date()),
 });
+
+/**
+ * What an automatic clean-up changed, one row per field of a book, so a batch can be undone.
+ * `book_id` is deliberately not a foreign key to books: a composite key into `books` would block
+ * a hand-over rewriting `teacher_id`, and a deleted book has nothing left to restore.
+ */
+export const metadataChanges = pgTable("metadata_changes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  teacherId: text("teacher_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  /** Every change made in one pass shares a batch, and is undone together. */
+  batchId: uuid("batch_id").notNull(),
+  bookId: uuid("book_id").notNull(),
+  field: text("field", { enum: ["series", "authors"] }).notNull(),
+  oldValue: jsonb("old_value").notNull(),
+  newValue: jsonb("new_value").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  undoneAt: timestamp("undone_at", { withTimezone: true }),
+});

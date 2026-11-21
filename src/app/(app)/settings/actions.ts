@@ -16,6 +16,7 @@ import {
   tidyRunSuggestions,
   type TidyRunStatus,
 } from "@/server/tidy-run";
+import { reconcileLibrary, undoReconcile } from "@/server/reconcile";
 import { requireTeacher } from "@/server/session";
 import { isValidTimeZone, updateTeacherSettings } from "@/server/settings";
 
@@ -103,4 +104,22 @@ export async function discardTidyAction(): Promise<ActionResult<null>> {
   const { teacherId } = await requireTeacher();
   await discardTidyRun(getDb(), teacherId);
   return ok(null);
+}
+
+/** Gives every series and author one spelling across the library, logged so it can be undone. */
+export async function settleSpellingsAction(): Promise<ActionResult<{ batchId: string | null; changed: number }>> {
+  const { teacherId } = await requireTeacher();
+  const done = await reconcileLibrary(getDb(), teacherId);
+  if (done) revalidatePath("/library");
+  return ok({ batchId: done?.batchId ?? null, changed: done?.changed ?? 0 });
+}
+
+/** Puts back everything one settling pass changed, except books edited since. */
+export async function undoSettleAction(batchId: unknown): Promise<ActionResult<{ restored: number; kept: number }>> {
+  const { teacherId } = await requireTeacher();
+  const parsed = z.string().uuid().safeParse(batchId);
+  if (!parsed.success) return fail("That change can't be undone.");
+  const result = await undoReconcile(getDb(), teacherId, parsed.data);
+  revalidatePath("/library");
+  return ok(result);
 }

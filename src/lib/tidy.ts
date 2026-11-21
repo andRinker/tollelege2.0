@@ -6,7 +6,7 @@
  * - A title or author list may be rewritten only into the same words or the same people.
  * - Every other field is only ever filled when it is blank. Nothing a teacher set is replaced.
  */
-import { parseSeries, seriesKey } from "./series";
+import { looseSeriesKey, parseSeries } from "./series";
 
 export type TidyBook = {
   id: string;
@@ -201,7 +201,7 @@ export function screenSuggestion(
     if (parsed) {
       const given = typeof gemini.seriesNumber === "number" && Number.isFinite(gemini.seriesNumber) ? gemini.seriesNumber : null;
       const number = given ?? parsed.number;
-      const name = knownSeries.find((known) => seriesKey(known) === seriesKey(parsed.name)) ?? parsed.name;
+      const name = knownSeries.find((known) => looseSeriesKey(known) === looseSeriesKey(parsed.name)) ?? parsed.name;
       patch.series = { name, number: number !== null && number >= 0 && number <= 9999 ? number : null };
       sources.series = "gemini";
     }
