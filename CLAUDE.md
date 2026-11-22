@@ -121,6 +121,12 @@ In the browser, every request that ends in a Gemini call goes through `src/lib/g
 
 A lookup only reports `unavailable` when *every* configured source failed; one source being down must never hide a book the other knows. Nor is anything cached while a source is down: a book only one source answered for is returned but not kept, and with none it's `unavailable`, not `not_found`. A "not found" cached while Google Books was refusing (its daily quota is a 429) hid The Nixie's Song for a day; migration 0011 cleared those.
 
+## Covers
+
+A cover is a catalogue link or a teacher's own photo, in `books.cover_url`. Catalogue covers are stored at their smallest size (Open Library `-M`, Google `zoom=1`), so `BookCover` asks for `coverCandidates` (`src/lib/covers.ts`): the larger sizes first, each falling back to the next, then the placeholder. New lookups ask for `-L` and, outside tests and fixtures, `bestCover` (`isbn-lookup/cover.ts`) tries each catalogue's cover at each size and keeps the widest that loads, is portrait and at least 150px; a failed request ("unreachable") never costs a book its cover, only a definite 404 or a tiny image does. Google's `zoom=3` is unverified against the live API (its quota was spent when this was written); the probe falls back to what works.
+
+A teacher's photo (`book_cover_photos`, base64 JPEG, one per title, shrunk to 800px in the browser) is the teacher's own edit, so `coverUrl` is marked `teacher` and automation leaves it alone; removing it unlocks the field. It is served from `/api/covers/<bookId>` with no sign-in, by unguessable id, so a connected teacher browsing a shelf sees it. A hand-over moves it with the title (its key to `books` is `DEFERRABLE` by hand in migration 0021) and copies it for a partial-copies title. `/library?cover=none` lists the books without one, linked from Library health.
+
 ## Shelf photos
 
 `src/server/shelf-scan/` reads a photo with Gemini, matches each spine against both catalogues, and returns proposals. It writes nothing.

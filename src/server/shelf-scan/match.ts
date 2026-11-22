@@ -186,7 +186,7 @@ async function searchOpenLibrary(query: Query, fetchFn: typeof fetch): Promise<R
       title: doc.title,
       subtitle: doc.subtitle ?? null,
       authors: doc.author_name ?? [],
-      coverUrl: doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : null,
+      coverUrl: doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg` : null,
     });
   }
   return found;

@@ -58,7 +58,7 @@ const frogAndToad: BookMetadata = {
   subtitle: null,
   authors: ["Arnold Lobel"],
   description: null,
-  coverUrl: "https://covers.openlibrary.org/b/id/51292-M.jpg",
+  coverUrl: "https://covers.openlibrary.org/b/id/51292-L.jpg",
   publisher: "HarperTrophy",
   publishedYear: 1979,
   pageCount: 64,

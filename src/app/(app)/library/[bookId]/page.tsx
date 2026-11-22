@@ -23,6 +23,7 @@ import { Avatar, PageHeader, Shape } from "@/ui/components/expressive";
 import { List, ListItem } from "@/ui/components/list";
 import { iconArrowBack, iconLibraryBooks } from "@/ui/icons/generated";
 import { Card } from "@/ui/components/surfaces";
+import { CoverPhoto } from "./cover-photo";
 import { AddCopyButton, BookActions, CopyMenu, LendableSwitch } from "./book-actions";
 
 export const metadata: Metadata = { title: "Book" };
@@ -88,7 +89,10 @@ export default async function BookPage({ params }: PageProps<"/library/[bookId]"
 
       <div className="grid grid-cols-1 gap-6 expanded:grid-cols-[260px_minmax(0,1fr)] expanded:items-start">
         <aside className="flex flex-col gap-4 max-expanded:grid max-expanded:grid-cols-[120px_minmax(0,1fr)] max-expanded:items-center medium:max-expanded:grid-cols-[180px_minmax(0,1fr)]">
-          <BookCover title={book.title} coverUrl={book.coverUrl} size="lg" className="rounded-lg shadow-2" />
+          <div className="flex flex-col gap-3">
+            <BookCover title={book.title} coverUrl={book.coverUrl} size="lg" className="rounded-lg shadow-2" />
+            <CoverPhoto bookId={book.id} coverUrl={book.coverUrl} />
+          </div>
           <div className="relative flex flex-col gap-1 overflow-hidden rounded-xl bg-primary-container p-5 text-on-primary-container">
             <span aria-hidden="true" className="absolute -top-6 -right-6">
               <Shape shape="cookie9" size={110} className="fill-primary/10" />

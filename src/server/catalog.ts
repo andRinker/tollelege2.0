@@ -358,6 +358,8 @@ export type BookListFilters = {
   genre?: string;
   /** One series, by name, however its books spell it. Its books come in series order. */
   series?: string;
+  /** "none" for books without a cover, so a teacher can photograph them. */
+  cover?: "none";
   /** Only these books. Internal: the grouped library reads one page of books this way. */
   ids?: string[];
   sort?: BookSort;
@@ -429,6 +431,7 @@ function libraryQuery(db: Database, teacherId: string, filters: BookListFilters)
   if (filters.location) conditions.push(eq(books.location, filters.location));
   if (filters.genre === "none") conditions.push(isNull(books.genreId));
   else if (filters.genre && /^[0-9a-f-]{36}$/i.test(filters.genre)) conditions.push(eq(books.genreId, filters.genre));
+  if (filters.cover === "none") conditions.push(sql`coalesce(btrim(${books.coverUrl}), '') = ''`);
   if (filters.ids) conditions.push(inArray(books.id, filters.ids.length ? filters.ids : ["00000000-0000-0000-0000-000000000000"]));
   if (filters.series?.trim()) conditions.push(sql`${seriesKeySql} = ${seriesKey(filters.series)}`);
   if (filters.availability === "available") conditions.push(sql`coalesce(${copyCounts.available}, 0) > 0`);

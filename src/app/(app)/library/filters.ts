@@ -15,6 +15,7 @@ export function parseLibraryFilters(params: SearchParams): Required<Pick<BookLis
     readingLevel: first(params.level) || undefined,
     location: first(params.bin) || undefined,
     genre: first(params.genre) || undefined,
+    cover: first(params.cover) === "none" ? ("none" as const) : undefined,
     series: first(params.series)?.slice(0, 120) || undefined,
     sort: (["title", "author", "recent"] as const).includes(sort as BookSort) ? (sort as BookSort) : "title",
     page: Number.isInteger(page) && page > 0 ? page : 1,

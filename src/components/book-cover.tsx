@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { coverCandidates } from "@/lib/covers";
 import { cx } from "@/ui/cx";
 import { Shape } from "@/ui/components/expressive";
 import type { ShapeName } from "@/ui/shapes/shapes";
@@ -27,7 +28,12 @@ type BookCoverProps = {
 
 /** The cover image, or a colorful placeholder with the title when there's no image. */
 export function BookCover({ title, coverUrl, className, size = "md" }: BookCoverProps) {
-  const [failed, setFailed] = useState(false);
+  // Catalogue covers are stored at their smallest size. Try the sharper sizes first, each falling
+  // back to the next when the catalogue doesn't have it, and the placeholder when none loads.
+  const candidates = coverUrl ? coverCandidates(coverUrl) : [];
+  const [failure, setFailure] = useState<{ url: string; count: number }>({ url: "", count: 0 });
+  const tried = failure.url === coverUrl ? failure.count : 0;
+  const failed = tried >= candidates.length;
   const shapeSize = size === "sm" ? 48 : size === "md" ? 120 : 200;
 
   if (coverUrl && !failed) {
@@ -35,11 +41,11 @@ export function BookCover({ title, coverUrl, className, size = "md" }: BookCover
       // Covers come from Open Library or Google Books, so they use a plain <img> without image optimization.
       // eslint-disable-next-line @next/next/no-img-element
       <img
-        src={coverUrl}
+        src={candidates[tried]}
         alt=""
         loading="lazy"
         referrerPolicy="no-referrer"
-        onError={() => setFailed(true)}
+        onError={() => setFailure({ url: coverUrl, count: tried + 1 })}
         className={cx("aspect-[2/3] w-full rounded-md bg-surface-container-highest object-cover", className)}
       />
     );

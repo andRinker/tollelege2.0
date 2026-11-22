@@ -138,7 +138,8 @@ export default function PrivacyPage() {
             </li>
             <li>
               <strong>Open Library</strong> provides book details. When you look up a book, only its ISBN is sent. Book covers load
-              from Open Library, so, as with any website, it can see your IP address when your browser loads a cover.
+              from Open Library, so, as with any website, it can see your IP address when your browser loads a cover. A photo you take of a cover is kept with that
+              book and goes nowhere else; connected teachers see it on a lent title, as they see any cover.
             </li>
             {usesGoogleBooks && (
               <li>

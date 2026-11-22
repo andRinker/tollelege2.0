@@ -28,7 +28,7 @@ describe("Open Library mapping", () => {
       authors: ["Arnold Lobel"],
       publisher: "HarperTrophy",
       publishedYear: 1979,
-      coverUrl: "https://covers.openlibrary.org/b/id/51292-M.jpg",
+      coverUrl: "https://covers.openlibrary.org/b/id/51292-L.jpg",
       source: "openlibrary",
     });
     expect(metadata?.pageCount).toBeGreaterThan(0);
