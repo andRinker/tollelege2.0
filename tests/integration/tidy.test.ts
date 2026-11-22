@@ -92,7 +92,7 @@ describe("tidy my library", () => {
       title: "The Lion, the Witch and the Wardrobe",
       authors: ["C. S. Lewis"],
       series: { name: "The Chronicles of Narnia", number: 2 },
-      coverUrl: "https://covers.openlibrary.org/b/id/123-M.jpg",
+      coverUrl: "https://covers.openlibrary.org/b/id/123-L.jpg",
       pageCount: 186,
     });
     expect(suggestion.sure).toBe(true);
@@ -105,7 +105,7 @@ describe("tidy my library", () => {
       authors: ["C. S. Lewis"],
       series: "The Chronicles of Narnia",
       seriesNumber: 2,
-      coverUrl: "https://covers.openlibrary.org/b/id/123-M.jpg",
+      coverUrl: "https://covers.openlibrary.org/b/id/123-L.jpg",
       pageCount: 186,
       publisher: "Collins",
       description: "Kept as it is.",

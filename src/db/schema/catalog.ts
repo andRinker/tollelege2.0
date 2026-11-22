@@ -104,6 +104,33 @@ export const books = pgTable(
   ],
 );
 
+/**
+ * A teacher's own photo of a book's cover, for the books no catalogue has one for. One per title,
+ * a small JPEG kept as base64 text, served from `/api/covers/<bookId>`; `books.cover_url` points
+ * there. The key to `books` is `DEFERRABLE` by hand in the migration, like the others, so a
+ * hand-over can move the title and its photo in one transaction.
+ */
+export const bookCoverPhotos = pgTable(
+  "book_cover_photos",
+  {
+    bookId: uuid("book_id").primaryKey(),
+    teacherId: text("teacher_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    /** JPEG bytes, base64. */
+    image: text("image").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("book_cover_photos_id_teacher_unique").on(t.bookId, t.teacherId),
+    foreignKey({
+      name: "book_cover_photos_book_fk",
+      columns: [t.bookId, t.teacherId],
+      foreignColumns: [books.id, books.teacherId],
+    }).onDelete("cascade"),
+  ],
+);
+
 export const copies = pgTable(
   "copies",
   {

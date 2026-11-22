@@ -101,7 +101,7 @@ export async function fetchOpenLibrary(isbn13: string, fetchFn: Fetch = fetch): 
     subtitle: text(edition?.subtitle) ?? text(doc?.subtitle),
     authors: authors.slice(0, 5),
     description: text(edition?.description),
-    coverUrl: coverId ? `https://covers.openlibrary.org/b/id/${coverId}-M.jpg` : null,
+    coverUrl: coverId ? `https://covers.openlibrary.org/b/id/${coverId}-L.jpg` : null,
     publisher: text(edition?.publishers?.[0]) ?? text(doc?.publisher?.[0]),
     // Edition dates are more reliable than the work's "first published" year.
     publishedYear: year(edition?.publish_date) ?? year(doc?.first_publish_year),

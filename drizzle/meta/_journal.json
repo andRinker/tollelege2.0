@@ -148,6 +148,13 @@
       "when": 1795224654993,
       "tag": "0020_fix_everything",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1795313733626,
+      "tag": "0021_cover_photos",
+      "breakpoints": true
     }
   ]
 }

@@ -2,6 +2,7 @@ import { and, arrayContains, asc, count, eq, inArray, isNotNull, isNull, max, ne
 import { alias, type PgColumn } from "drizzle-orm/pg-core";
 import type { Database } from "@/db/client";
 import {
+  bookCoverPhotos,
   books,
   classes,
   classTeacherInvites,
@@ -14,6 +15,7 @@ import {
   students,
   user,
 } from "@/db/schema";
+import { coverPhotoUrl, isCoverPhotoUrl } from "@/lib/covers";
 import { renumberCopies } from "./copy-numbers";
 import { ConflictError, NotFoundError } from "./errors";
 import { genreForRecipient } from "./genres";
@@ -564,6 +566,8 @@ export async function acceptHandover(db: Database, toId: string, handoverId: str
           }
         }
         await tx.update(copies).set({ teacherId: toId }).where(and(eq(copies.teacherId, fromId), inArray(copies.bookId, whole)));
+        // A title's own photo of its cover goes with it.
+        await tx.update(bookCoverPhotos).set({ teacherId: toId }).where(and(eq(bookCoverPhotos.teacherId, fromId), inArray(bookCoverPhotos.bookId, whole)));
       }
 
       // Some of a title's copies: onto the recipient's own title, or a new one with the
@@ -583,7 +587,8 @@ export async function acceptHandover(db: Database, toId: string, handoverId: str
               subtitle: book.subtitle,
               authors: book.authors,
               description: book.description,
-              coverUrl: book.coverUrl,
+              // A photo is the sender's own row; the recipient's copy of it is made below.
+              coverUrl: isCoverPhotoUrl(book.coverUrl) ? null : book.coverUrl,
               publisher: book.publisher,
               publishedYear: book.publishedYear,
               pageCount: book.pageCount,
@@ -598,6 +603,13 @@ export async function acceptHandover(db: Database, toId: string, handoverId: str
               genreId: book.genreId ? (genreFor.get(book.genreId) ?? null) : null,
             })
             .returning({ id: books.id });
+          if (isCoverPhotoUrl(book.coverUrl)) {
+            const [photo] = await tx.select().from(bookCoverPhotos).where(eq(bookCoverPhotos.bookId, book.id));
+            if (photo) {
+              await tx.insert(bookCoverPhotos).values({ bookId: targetId, teacherId: toId, image: photo.image });
+              await tx.update(books).set({ coverUrl: coverPhotoUrl(targetId, Date.now()) }).where(eq(books.id, targetId));
+            }
+          }
         }
         await moveCopies(given, targetId);
         // The copies the sender keeps close ranks, as after deleting one.

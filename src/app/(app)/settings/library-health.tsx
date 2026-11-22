@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import type { LibraryHealth } from "@/lib/health";
 import { Button } from "@/ui/components/button";
@@ -27,7 +28,7 @@ export function LibraryHealthCard({ health, tidyAvailable }: { health: LibraryHe
   const needed: [string, number | null][] = [
     ["No author", missing.authors],
     ["No description", missing.description],
-    ["No cover", missing.cover],
+    ["No cover (photograph them)", missing.cover],
     ["No genre", missing.genre],
     ["Series spelled two ways", health.unsettledSeries],
     ["Author spelled two ways", health.unsettledAuthors],
@@ -84,7 +85,13 @@ function List({ title, rows, empty }: { title: string; rows: [string, number][];
       ) : (
         <ul className="grid gap-x-6 text-body-sm text-on-surface-variant medium:grid-cols-2">
           {rows.map(([label, count]) => (
-            <li key={label}>{`${label}: ${count}`}</li>
+            <li key={label}>
+              {label.startsWith("No cover") ? (
+                <Link href="/library?cover=none" className="underline">{`${label}: ${count}`}</Link>
+              ) : (
+                `${label}: ${count}`
+              )}
+            </li>
           ))}
         </ul>
       )}

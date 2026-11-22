@@ -5,7 +5,9 @@ import { z } from "zod";
 import { getDb } from "@/db/client";
 import { manualCopyStatuses, metadataSources } from "@/db/schema/enums";
 import { type ActionResult, fail, ok } from "@/lib/action-result";
+import { isStoredCover } from "@/lib/covers";
 import { normalizeIsbn } from "@/lib/isbn";
+import { removeCoverPhoto, saveCoverPhoto } from "@/server/covers";
 import {
   addCopies,
   type BookDetailsInput,
@@ -70,9 +72,8 @@ const bookDetails = z.object({
   description: optionalText(5000),
   coverUrl: z
     .string()
-    .url()
-    .startsWith("https://")
     .max(500)
+    .refine(isStoredCover, "That isn't a cover link.")
     .nullable(),
   publisher: optionalText(200),
   publishedYear: z.number().int().min(1400).max(2100).nullable(),
@@ -181,6 +182,31 @@ export async function updateBookAction(bookId: string, input: BookDetailsInput):
   }
   try {
     await updateBookDetails(getDb(), teacherId, bookId, parsed.data);
+    revalidateLibrary(bookId);
+    return ok();
+  } catch (error) {
+    return handleError(error);
+  }
+}
+
+/** A teacher's photo of a book's cover, already shrunk to a JPEG by the browser and sent as base64. */
+export async function setCoverPhotoAction(bookId: string, base64Jpeg: string): Promise<ActionResult> {
+  const classroom = await requireClassroom();
+  if (!id.safeParse(bookId).success || typeof base64Jpeg !== "string") return fail("That book wasn't found.");
+  try {
+    await saveCoverPhoto(getDb(), classroom.teacherId, bookId, base64Jpeg);
+    revalidateLibrary(bookId);
+    return ok();
+  } catch (error) {
+    return handleError(error);
+  }
+}
+
+export async function removeCoverPhotoAction(bookId: string): Promise<ActionResult> {
+  const classroom = await requireClassroom();
+  if (!id.safeParse(bookId).success) return fail("That book wasn't found.");
+  try {
+    await removeCoverPhoto(getDb(), classroom.teacherId, bookId);
     revalidateLibrary(bookId);
     return ok();
   } catch (error) {

@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import type { Database } from "@/db/client";
 import { isbnLookupCache } from "@/db/schema";
+import { bestCover } from "./cover";
 import { mergeMetadata } from "./merge";
 import type { ParsedSeries } from "@/lib/series";
 import {
@@ -71,7 +72,8 @@ export async function lookupIsbn(db: Database, isbn13: string, options: LookupOp
   // Every configured source failed, so "not found" would be a lie worth caching for a day.
   if (answered === 0) return { status: "unavailable" };
 
-  const metadata = mergeMetadata(answers[0] ?? null, answers[1] ?? null);
+  const merged = mergeMetadata(answers[0] ?? null, answers[1] ?? null);
+  const metadata = merged && (await withBestCover(merged, answers, options));
   if (answered < attempts.length) return metadata ? { status: "found", metadata } : { status: "unavailable" };
 
   await db
@@ -80,6 +82,22 @@ export async function lookupIsbn(db: Database, isbn13: string, options: LookupOp
     .onConflictDoUpdate({ target: isbnLookupCache.isbn13, set: { payload: metadata, fetchedAt: now } });
 
   return metadata ? { status: "found", metadata } : { status: "not_found" };
+}
+
+/**
+ * Both catalogues' covers, each tried at every size it has, and the sharpest one that works kept.
+ * The merge alone would take Open Library's whenever it has one, however small or dead. Skipped
+ * when a fetch is injected or the fixtures are on, since those never serve images.
+ */
+async function withBestCover(
+  metadata: BookMetadata,
+  answers: (BookMetadata | null)[],
+  options: LookupOptions,
+): Promise<BookMetadata> {
+  if (options.fetchFn || process.env.ISBN_LOOKUP_FIXTURES === "1") return metadata;
+  const urls = answers.map((answer) => answer?.coverUrl);
+  if (urls.every((url) => !url)) return metadata;
+  return { ...metadata, coverUrl: await bestCover(urls) };
 }
 
 /** Open Library's series for one ISBN, from the same source (or fixtures) as a lookup. */
