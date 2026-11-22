@@ -10,7 +10,7 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 /**
- * The next batch of the teacher's "Tidy my library" run, streaming how many books Gemini has
+ * The next batch of the teacher's "Fix everything" run, streaming how many books Gemini has
  * answered for (`TidyProgress` lines) and then the run as it stands. The browser calls this
  * again and again until the run is finished. Nothing in the library is changed here; the
  * teacher chooses what to apply at the end. Always the teacher's own library.

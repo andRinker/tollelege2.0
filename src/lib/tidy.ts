@@ -1,5 +1,5 @@
 /**
- * What "Tidy my library" may change, decided without a server so the review screen, the
+ * What "Fix everything" may change, decided without a server so the review screen, the
  * apply step and the tests share one rule. Gemini and the catalogues only ever propose; this
  * is what keeps a confident wrong answer from turning a book into a different one.
  *
@@ -85,8 +85,10 @@ export type GeminiAnswer = {
 
 /** Catalogue details for the same book: by its ISBN, or a cover from a search by title and author. */
 export type CatalogueFacts = Partial<Pick<TidyBook, Exclude<Fillable, "readingLevel"> | "authors">> & {
+  /** The series a catalogue records for the edition, with the book's place in it. */
+  series?: { name: string; number: number | null };
   /** Fields that came from a title-and-author search rather than the book's own ISBN. */
-  searched?: (Fillable | "authors")[];
+  searched?: (Fillable | "authors" | "series")[];
 };
 
 const words = (text: string) =>
@@ -202,14 +204,22 @@ export function screenSuggestion(
     sources.authors = "gemini";
   }
 
-  if (!book.series && gemini.series && !locked.has("series")) {
-    const parsed = parseSeries(gemini.series);
-    if (parsed) {
-      const given = typeof gemini.seriesNumber === "number" && Number.isFinite(gemini.seriesNumber) ? gemini.seriesNumber : null;
-      const number = given ?? parsed.number;
-      const name = knownSeries.find((known) => looseSeriesKey(known) === looseSeriesKey(parsed.name)) ?? parsed.name;
-      patch.series = { name, number: number !== null && number >= 0 && number <= 9999 ? number : null };
-      sources.series = "gemini";
+  if (!book.series && !locked.has("series")) {
+    // A catalogue's series statement is the record of this edition and is preferred over Gemini's
+    // recollection of the work; either way it takes the library's own spelling of that series.
+    const named = (name: string) => knownSeries.find((known) => looseSeriesKey(known) === looseSeriesKey(name)) ?? name;
+    const valid = (number: number | null) => (number !== null && number >= 0 && number <= 9999 ? number : null);
+    const recorded = catalogue.series ? parseSeries(catalogue.series.name) : null;
+    if (catalogue.series && recorded) {
+      patch.series = { name: named(recorded.name), number: valid(catalogue.series.number ?? recorded.number) };
+      sources.series = catalogue.searched?.includes("series") ? "search" : "catalogue";
+    } else if (gemini.series) {
+      const parsed = parseSeries(gemini.series);
+      if (parsed) {
+        const given = typeof gemini.seriesNumber === "number" && Number.isFinite(gemini.seriesNumber) ? gemini.seriesNumber : null;
+        patch.series = { name: named(parsed.name), number: valid(given ?? parsed.number) };
+        sources.series = "gemini";
+      }
     }
   }
 

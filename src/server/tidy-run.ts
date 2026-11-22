@@ -7,7 +7,7 @@ import { reconcileLibrary } from "./reconcile";
 import { type AskGemini, applyTidy, suggestTidyBatch, type TidyProgress } from "./tidy";
 
 /**
- * "Tidy my library" run through the whole library at one press. The browser keeps asking for
+ * "Fix everything" run through the whole library at one press. The browser keeps asking for
  * the next batch while any page of the app is open (`stepTidyRun`), and the server keeps where
  * it has got to and every suggestion found, so the tab closing loses nothing. The teacher
  * reviews everything once, at the end, and only what they tick is applied.

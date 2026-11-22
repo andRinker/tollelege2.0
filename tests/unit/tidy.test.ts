@@ -65,6 +65,24 @@ describe("screenSuggestion", () => {
     expect(suggestion?.sure).toBe(true);
   });
 
+  it("takes a catalogue's series over Gemini's, in the library's spelling, and applies it unasked", () => {
+    const suggestion = screenSuggestion(book(), {
+      catalogue: { series: { name: "Chronicles of Narnia", number: 2 } },
+      gemini: { series: "Narnia", seriesNumber: 5, sure: false },
+      knownSeries: ["The Chronicles of Narnia"],
+    });
+    expect(suggestion?.patch.series).toEqual({ name: "The Chronicles of Narnia", number: 2 });
+    expect(suggestion?.sources.series).toBe("catalogue");
+    expect(splitAutomatic(suggestion!).automatic.series).toEqual({ name: "The Chronicles of Narnia", number: 2 });
+  });
+
+  it("offers a series found by title search for review, and leaves a locked one alone", () => {
+    const searched = screenSuggestion(book(), { catalogue: { series: { name: "Narnia", number: 1 }, searched: ["series"] } });
+    expect(searched?.sources.series).toBe("search");
+    expect(splitAutomatic(searched!).automatic).toEqual({});
+    expect(screenSuggestion(book({ locked: ["series"] }), { catalogue: { series: { name: "Narnia", number: 1 } } })).toBeNull();
+  });
+
   it("never turns a book into another, or replaces a series already set", () => {
     const suggestion = screenSuggestion(book({ series: "Narnia", seriesNumber: 2 }), {
       gemini: { title: "Prince Caspian", authors: ["J. R. R. Tolkien"], series: "Middle-earth", seriesNumber: 1, sure: true },

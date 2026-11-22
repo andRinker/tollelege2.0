@@ -196,7 +196,7 @@ type AppShellProps = {
   currentClassroom: string | null;
   /** When an admin is acting as this teacher, the time it lapses, already formatted. */
   actingUntil: string | null;
-  /** The teacher's "Tidy my library" run, kept going from here while any page is open. */
+  /** The teacher's "Fix everything" run, kept going from here while any page is open. */
   tidyRun: TidyRunStatus | null;
   children: ReactNode;
 };
