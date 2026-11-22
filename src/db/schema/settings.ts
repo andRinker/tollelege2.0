@@ -77,7 +77,7 @@ export const teacherSettings = pgTable(
 );
 
 /**
- * "Tidy my library" working through the whole library on its own: where it has got to and
+ * "Fix everything" working through the whole library on its own: where it has got to and
  * what it has found, so it survives the tab closing and is reviewed once, at the end. One
  * row per teacher; starting again replaces it, and applying or discarding deletes it.
  */

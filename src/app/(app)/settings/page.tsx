@@ -8,7 +8,7 @@ import { PageHeader } from "@/ui/components/expressive";
 import { SettingsForm } from "./settings-form";
 
 export const metadata: Metadata = { title: "Settings" };
-// "Tidy my library" asks Gemini about a batch of books in one request, which can take a minute.
+// "Fix everything" asks Gemini about a batch of books in one request, which can take a minute.
 export const maxDuration = 120;
 
 export default async function SettingsPage() {

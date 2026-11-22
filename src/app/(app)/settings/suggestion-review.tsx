@@ -16,16 +16,14 @@ import { applyTidyAction, discardTidyAction, tidyReviewAction } from "./actions"
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
 
 /**
- * "Tidy my library": one press starts it looking through every book, 10 at a time, while the
- * teacher carries on anywhere in the app (`TidyRunProvider` keeps it going). The catalogues
- * and Gemini suggest missing series, tidier titles and author names, covers and blank
- * details, and once every book has been looked at, the teacher ticks which to apply here.
- * Nothing changes until they do, and nothing they set is replaced.
+ * What a "Fix everything" run left for the teacher: the doubtful suggestions, ticked or not,
+ * once every book has been looked at. Also shows where a run has got to, and offers "Carry on"
+ * when batches kept failing. Nothing changes until they apply, and nothing they set is replaced.
  */
-export function TidyLibrary() {
+export function SuggestionReview() {
   const showSnackbar = useSnackbar();
-  const { status, progress, paused, start, resume, clear } = useTidyRun();
-  const [pending, setPending] = useState<"start" | "apply" | "discard" | null>(null);
+  const { status, progress, paused, resume, clear } = useTidyRun();
+  const [pending, setPending] = useState<"apply" | "discard" | null>(null);
   const [suggestions, setSuggestions] = useState<TidySuggestion[] | null>(null);
   const [chosen, setChosen] = useState<Set<string>>(new Set());
 
@@ -47,13 +45,6 @@ export function TidyLibrary() {
     };
   }, [ready, showSnackbar]);
 
-  async function begin() {
-    setPending("start");
-    const problem = await start(false);
-    setPending(null);
-    if (problem) showSnackbar({ message: problem });
-  }
-
   async function apply() {
     setPending("apply");
     const result = await applyTidyAction([...chosen]);
@@ -62,7 +53,7 @@ export function TidyLibrary() {
       showSnackbar({ message: result.message });
       return;
     }
-    showSnackbar({ message: `Tidied ${plural(result.data.changed, "book")}.` });
+    showSnackbar({ message: `Fixed ${plural(result.data.changed, "book")}.` });
     setSuggestions(null);
     clear();
   }
@@ -87,22 +78,11 @@ export function TidyLibrary() {
       return next;
     });
 
-  if (status === null) {
-    return (
-      <div id="tidy" className="flex scroll-mt-24 flex-col items-start gap-3">
-        <Button variant="tonal" icon={iconAutoStories} isPending={pending === "start"} onPress={() => void begin()}>
-          Tidy my library
-        </Button>
-        <p className="text-body-sm text-on-surface-variant">
-          Looks through every book and suggests fixes: missing series, tidier titles and author names, covers, and blank details. It keeps going while you use the rest of the app, and when every book has been looked at you choose what to apply here. Titles, authors and series are sent to Google Gemini. Nothing you&apos;ve set is replaced.
-        </p>
-      </div>
-    );
-  }
+  if (status === null) return null;
 
   if (status.state === "running") {
     return (
-      <div id="tidy" className="flex scroll-mt-24 flex-col items-start gap-3">
+      <div className="flex flex-col items-start gap-3">
         <p className="text-body-sm text-on-surface-variant" aria-live="polite">
           {describeRun(status, progress, paused)}
         </p>
@@ -122,16 +102,16 @@ export function TidyLibrary() {
 
   if (suggestions === null) {
     return (
-      <p id="tidy" className="scroll-mt-24 text-body-sm text-on-surface-variant">
-        Loading what Tidy found…
+      <p className="text-body-sm text-on-surface-variant">
+        Loading what needs a look…
       </p>
     );
   }
 
   if (suggestions.length === 0) {
     return (
-      <div id="tidy" className="flex scroll-mt-24 flex-col items-start gap-3">
-        <p className="text-body-sm text-on-surface-variant">{`Tidy looked at ${plural(status.checked, "book")} and found nothing to change.`}</p>
+      <div className="flex flex-col items-start gap-3">
+        <p className="text-body-sm text-on-surface-variant">{`Looked at ${plural(status.checked, "book")}: nothing more needs a look.`}</p>
         <Button variant="tonal" isPending={pending === "discard"} onPress={() => void discard()}>
           Done
         </Button>
@@ -141,9 +121,9 @@ export function TidyLibrary() {
 
   const busy = pending !== null;
   return (
-    <div id="tidy" className="flex w-full scroll-mt-24 flex-col items-start gap-3">
+    <div className="flex w-full flex-col items-start gap-3">
       <p className="text-body-sm text-on-surface-variant">
-        {`Tidy looked at ${plural(status.checked, "book")} and could tidy ${plural(suggestions.length, "of them", "of them")}. The sure ones are ticked; the rest say why to check them first. Each change is checked again against the book as it is now when you apply it.`}
+        {`Looked at ${plural(status.checked, "book")}. ${plural(suggestions.length, "book")} need a look before anything is changed: the ones Gemini is sure of are ticked, the rest say why to check them first. Each change is checked again against the book as it is now when you apply it.`}
       </p>
       <div className="flex flex-wrap gap-2">
         <Button variant="text" size="xs" isDisabled={busy} onPress={() => setChosen(new Set(suggestions.map((suggestion) => suggestion.bookId)))}>

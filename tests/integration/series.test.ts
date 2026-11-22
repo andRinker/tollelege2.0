@@ -4,7 +4,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Database } from "@/db/client";
 import { books } from "@/db/schema";
 import { type BookDetailsInput, createBook, fillSeries, listLibrary } from "@/server/catalog";
-import { FIND_SERIES_BATCH, findSeriesBatch } from "@/server/find-series";
+import { lastReconcile, undoReconcile } from "@/server/reconcile";
+import { startTidyRun, stepTidyRun } from "@/server/tidy-run";
 import type { Fetch } from "@/server/isbn-lookup/sources";
 import { createTeacher, createTestDb, type TestDatabase } from "../helpers/test-db";
 
@@ -62,50 +63,46 @@ describe("series", () => {
     expect(await seriesOf(typed.bookId)).toEqual({ series: "Wonder", number: 1 });
   });
 
-  it("finds series for a whole library a batch at a time, from where it left off", async () => {
+  it("finds a series through a Fix everything run: the catalogue's wins, a teacher's cleared one is left alone, and it undoes", async () => {
     const t = await createTeacher(db);
-    const ids: string[] = [];
-    for (let n = 1; n <= FIND_SERIES_BATCH + 5; n++) {
-      const { bookId } = await createBook(db, t, bookInput({ title: `Book ${n}`, isbn13: isbnFor(n) }));
-      ids.push(bookId);
-    }
-    // One with no ISBN and one with a series already aren't asked about.
-    await createBook(db, t, bookInput({ title: "No ISBN" }));
-    const kept = await createBook(db, t, bookInput({ title: "Kept", isbn13: isbnFor(99), series: "Mine", seriesNumber: 2 }));
+    const found = await createBook(db, t, bookInput({ title: "Book 2", isbn13: isbnFor(2) }));
+    const quiet = await createBook(db, t, bookInput({ title: "Book 3", isbn13: isbnFor(3) }));
+    const cleared = await createBook(db, t, bookInput({ title: "Book 4", isbn13: isbnFor(4) }));
+    await db.update(books).set({ fieldSources: { series: "teacher" } }).where(eq(books.id, cleared.bookId));
+    const existing = await createBook(db, t, bookInput({ title: "Kept", isbn13: isbnFor(99), series: "Mine", seriesNumber: 2 }));
 
-    const asked: string[] = [];
     const fetchFn = (async (input: RequestInfo | URL) => {
-      const isbn = String(input).match(/isbn\/(\d+)\.json/)![1];
-      asked.push(isbn);
-      const n = Number(isbn.slice(-6));
-      // Book 4 has a series, but Open Library is too busy to say so the first time it's asked.
-      if (n === 4 && asked.filter((asking) => asking === isbn).length === 1) return new Response("Busy", { status: 503 });
+      const edition = String(input).match(/isbn\/(\d+)\.json/);
+      if (!edition) return Response.json({ docs: [] });
+      const n = Number(edition[1].slice(-6));
       if (n % 2 === 0) return Response.json({ title: `Book ${n}`, series: [`The 39 clues ; bk. ${n}`] });
       return Response.json({ title: `Book ${n}` });
     }) as Fetch;
+    const answers = async (batch: { title: string }[]) => batch.map(() => ({}));
 
-    const first = await findSeriesBatch(db, t, { fetchFn });
-    expect(first).toMatchObject({ checked: FIND_SERIES_BATCH, remaining: 5 });
-    expect(first.next).not.toBeNull();
-    const second = await findSeriesBatch(db, t, { after: first.next, fetchFn });
-    expect(second).toMatchObject({ checked: 5, remaining: 0, next: null });
-    // Books are walked in id order, so which batch meets the busy answer varies; one does.
-    const unanswered = [...first.unansweredIds, ...second.unansweredIds];
-    expect(unanswered).toEqual([ids[3]]);
-    expect(first.found + second.found).toBe(14);
-    expect(await seriesOf(ids[3])).toEqual({ series: null, number: null });
+    await startTidyRun(db, t, { confident: true });
+    let step = await stepTidyRun(db, t, { fetchFn, askGemini: answers });
+    while (step.status?.state === "running") step = await stepTidyRun(db, t, { fetchFn, askGemini: answers });
 
-    // Asking again about just the unanswered book finds its series, and walks nothing else.
-    const retried = await findSeriesBatch(db, t, { ids: unanswered, fetchFn });
-    expect(retried).toMatchObject({ checked: 1, found: 1, unansweredIds: [], next: null });
+    expect(await seriesOf(found.bookId)).toEqual({ series: "The 39 Clues", number: 2 });
+    expect(await seriesOf(quiet.bookId)).toEqual({ series: null, number: null });
+    expect(await seriesOf(cleared.bookId)).toEqual({ series: null, number: null });
+    expect(await seriesOf(existing.bookId)).toEqual({ series: "Mine", number: 2 });
+    const [row] = await db.select({ sources: books.fieldSources }).from(books).where(eq(books.id, found.bookId));
+    expect(row.sources).toMatchObject({ series: "catalogue" });
 
-    expect(asked).not.toContain(isbnFor(99));
-    expect(asked).toHaveLength(FIND_SERIES_BATCH + 6);
-    expect(new Set(asked).size).toBe(FIND_SERIES_BATCH + 5);
-    expect(await seriesOf(kept.bookId)).toEqual({ series: "Mine", number: 2 });
-    const withSeries = await Promise.all(ids.map(seriesOf));
-    expect(withSeries[3]).toEqual({ series: "The 39 Clues", number: 4 });
-    expect(withSeries[2]).toEqual({ series: null, number: null });
+    const last = await lastReconcile(db, t);
+    expect(last).not.toBeNull();
+    await undoReconcile(db, t, last!.batchId);
+    expect(await seriesOf(found.bookId)).toEqual({ series: null, number: null });
+  });
+
+  it("never fills a series a teacher cleared, however it is found", async () => {
+    const t = await createTeacher(db);
+    const { bookId } = await createBook(db, t, bookInput({ title: "Cleared" }));
+    await db.update(books).set({ fieldSources: { series: "teacher" } }).where(eq(books.id, bookId));
+    await fillSeries(db, t, bookId, "Wonder");
+    expect(await seriesOf(bookId)).toEqual({ series: null, number: null });
   });
 
   it("stacks books whose series names spelled out their place, once, with a migration", async () => {

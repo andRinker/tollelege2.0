@@ -20,7 +20,7 @@ import { libraryAuthorSpellings, normalizeTags, setSeriesIfMissing } from "./cat
 import { listGenres } from "./genres";
 import { type LoggedChange, logChanges } from "./reconcile";
 import { getTeacherSettings } from "./settings";
-import { lookupIsbn } from "./isbn-lookup";
+import { LookupUnavailableError, lookupIsbn, lookupSeries } from "./isbn-lookup";
 import { matchSpine } from "./shelf-scan/match";
 import { countKeys, readGeminiStream, streamUrl } from "./gemini-stream";
 import { configuredModel, DEFAULT_MODEL, ENDPOINT, thinkingLevel } from "./shelf-scan/vision";
@@ -210,6 +210,7 @@ async function catalogueFacts(db: Database, book: TidyBook, fetchFn?: typeof fet
   const open = (field: TrackedField) => !book.locked.includes(field);
   const missing =
     (book.authors.length === 0 && open("authors")) ||
+    (!book.series && open("series")) ||
     FILLABLE.some((field) => field !== "readingLevel" && open(field) && (book[field] === null || book[field] === ""));
   if (!missing) return {};
   const facts: CatalogueFacts = {};
@@ -217,7 +218,18 @@ async function catalogueFacts(db: Database, book: TidyBook, fetchFn?: typeof fet
   try {
     if (book.isbn13) {
       const found = await lookupIsbn(db, book.isbn13, options);
-      if (found.status === "found") Object.assign(facts, factsOf(found.metadata));
+      if (found.status === "found") {
+        Object.assign(facts, factsOf(found.metadata));
+        // An answer cached before series were read has no `series` key: unknown, not "no series".
+        // Open Library is asked about that edition again, and an outage there is just no series.
+        if (found.metadata.series === undefined && !book.series && open("series")) {
+          const series = await lookupSeries(book.isbn13, options).catch((error) => {
+            if (error instanceof LookupUnavailableError) return null;
+            throw error;
+          });
+          if (series) facts.series = series;
+        }
+      }
     }
     if (!book.isbn13 || (!book.coverUrl && !facts.coverUrl)) {
       const match = await matchSpine({ title: book.title, author: book.authors[0] ?? null }, fetchFn);
@@ -248,11 +260,15 @@ function factsOf(metadata: {
   publishedYear?: number | null;
   pageCount?: number | null;
   authors?: string[];
+  series?: string | null;
+  seriesNumber?: number | null;
 }): CatalogueFacts {
-  const { subtitle, description, coverUrl, publisher, publishedYear, pageCount, authors } = metadata;
-  return Object.fromEntries(
+  const { subtitle, description, coverUrl, publisher, publishedYear, pageCount, authors, series, seriesNumber } = metadata;
+  const facts = Object.fromEntries(
     Object.entries({ subtitle, description, coverUrl, publisher, publishedYear, pageCount, authors }).filter(([, value]) => value != null),
   ) as CatalogueFacts;
+  if (series) facts.series = { name: series, number: seriesNumber ?? null };
+  return facts;
 }
 
 /**
@@ -286,10 +302,12 @@ export async function applyTidy(
     // Remember who said each field, so the card can say so and a later pass knows it wasn't the teacher.
     const origin: Record<string, string> = { ...sources };
     for (const key of Object.keys(kept) as (keyof TidyPatch)[]) {
+      // A series records its own source when it is set, below.
+      if (key === "series") continue;
       const source = change.sources?.[key];
       if (source) origin[key === "genre" ? "genreId" : key] = source;
     }
-    if (Object.keys(kept).length > 0) fields.fieldSources = origin;
+    if (Object.keys(fields).length > 0 || tags || genre) fields.fieldSources = origin;
     if (tags) fields.tags = normalizeTags(tags);
     if (genre) {
       const id = genreIds.get(genre.toLowerCase());
@@ -306,7 +324,7 @@ export async function applyTidy(
         }
       }
     }
-    const setSeries = series ? await setSeriesIfMissing(db, teacherId, book.id, series) : null;
+    const setSeries = series ? await setSeriesIfMissing(db, teacherId, book.id, series, change.sources?.series) : null;
     if (setSeries) {
       touched = true;
       logged.push({ bookId: book.id, field: "series", from: book.series, to: setSeries.name });

@@ -5,7 +5,6 @@ import { z } from "zod";
 import { getDb } from "@/db/client";
 import { readingLevelSystems, themeContrasts, themeModes } from "@/db/schema/enums";
 import { type ActionResult, fail, ok } from "@/lib/action-result";
-import { FIND_SERIES_BATCH, findSeriesBatch, type FindSeriesResult } from "@/server/find-series";
 import type { TidySuggestion } from "@/lib/tidy";
 import { tidyConfigured } from "@/server/tidy";
 import {
@@ -45,32 +44,13 @@ export async function saveSettings(patch: SettingsPatch): Promise<ActionResult> 
   return ok();
 }
 
-/**
- * One batch of "Find series for my library": the next books from `after`, or with `retry`, the
- * books an earlier batch left unanswered. Always the teacher's own library, like Settings.
- */
-export async function findSeriesAction(
-  after: string | null,
-  retry?: string[],
-): Promise<ActionResult<FindSeriesResult>> {
-  const { teacherId } = await requireTeacher();
-  const cursor = z.uuid().nullable().safeParse(after);
-  const ids = z.array(z.uuid()).max(FIND_SERIES_BATCH).optional().safeParse(retry);
-  if (!cursor.success || !ids.success) return fail("Start again from the beginning.");
-  const result = await findSeriesBatch(getDb(), teacherId, { after: cursor.data, ids: ids.data });
-  if (result.checked > 0 && result.unansweredIds.length === result.checked) {
-    return fail("Open Library isn't answering right now. Try again in a few minutes.");
-  }
-  if (result.found > 0) revalidatePath("/library");
-  return ok(result);
-}
-
 const bookIds = z.array(z.uuid()).max(5000);
 
 /**
- * Starts "Tidy my library" from the first book; the app frame then keeps it going. With
- * `fixEverything`, spellings are settled first and what Gemini is sure of is applied as the run
- * goes, all under one batch the teacher can undo; only the doubtful wait for review.
+ * Starts "Fix everything" from the first book; the app frame then keeps it going. With
+ * `fixEverything` (what the button always sends), spellings are settled first and what Gemini is
+ * sure of is applied as the run goes, all under one batch the teacher can undo; only the doubtful
+ * wait for review. Without it, nothing of Gemini's is applied unasked.
  */
 export async function startTidyAction(fixEverything: unknown = false): Promise<ActionResult<TidyRunStatus>> {
   const { teacherId } = await requireTeacher();

@@ -11,10 +11,10 @@ import type { TidyRunStatus, TidyStep } from "@/server/tidy-run";
 import { useSnackbar } from "@/ui/components/snackbar";
 
 /**
- * Keeps "Tidy my library" going from the app's frame, so the teacher can use the rest of the
+ * Keeps "Fix everything" going from the app's frame, so the teacher can use the rest of the
  * app while it works through every book. It asks the server for one batch after another for
  * as long as any page of the app is open; the server keeps the run, so closing the tab only
- * pauses it. The review happens on Settings once every book has been looked at.
+ * pauses it. The review happens in Settings → Catalog once every book has been looked at.
  */
 
 type TidyRun = {
@@ -92,8 +92,8 @@ export function TidyRunProvider({ initial, children }: { initial: TidyRunStatus 
           notify.current.router.refresh();
           notify.current.showSnackbar({
             message: next.found
-              ? `Tidy has looked at every book.${fixed} ${plural(next.found, "suggestion")} need a look from you.`
-              : `Tidy has looked at every book and found nothing more to change.${fixed}`,
+              ? `Every book has been looked at.${fixed} ${plural(next.found, "suggestion")} need a look from you.`
+              : `Every book has been looked at and nothing more needs changing.${fixed}`,
             action: { label: "Review", onAction: () => notify.current.router.push("/settings#tidy") },
             duration: 15_000,
           });
@@ -138,11 +138,11 @@ export function TidyRunChip() {
   const label =
     status.state === "ready"
       ? status.found
-        ? `Tidy: ${plural(status.found, "fix", "fixes")} to review`
-        : "Tidy: finished"
+        ? `${plural(status.found, "fix", "fixes")} to review`
+        : "Library fixed"
       : paused
-        ? "Tidy paused"
-        : `Tidying: ${status.checked} of ${status.total}`;
+        ? "Fixing paused"
+        : `Fixing: ${status.checked} of ${status.total}`;
   return (
     <Link
       data-tidy-chip

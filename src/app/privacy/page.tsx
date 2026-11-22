@@ -149,7 +149,7 @@ export default function PrivacyPage() {
             {usesShelfPhotos && (
               <li>
                 <strong>Google Gemini</strong> reads shelf photos, if you use &ldquo;Photograph a shelf,&rdquo; and suggests fixes
-                to your catalogue, if you use &ldquo;Tidy my library.&rdquo; See below.
+                to your catalogue, if you use &ldquo;Fix everything.&rdquo; See below.
               </li>
             )}
           </ul>
@@ -178,7 +178,7 @@ export default function PrivacyPage() {
         {usesShelfPhotos && (
           <Section title="Tidying your library">
             <p>
-              &ldquo;Tidy my library&rdquo; in Settings sends the titles, subtitles, authors, ISBNs, publishers, years, series,
+              &ldquo;Tidy my library&rdquo; in Settingsldquo;Fix everything&ldquo;Tidy my library&rdquo; in Settingsrdquo; in Settings sends the titles, subtitles, authors, ISBNs, publishers, years, series,
               tags and reading levels of your books, with the names of your genres, to Google&rsquo;s Gemini service, ten at a
               time, which suggests missing series, tidier titles and author names, genres, reading levels, tags and short
               descriptions. It also looks your books up in the catalogues above, by ISBN or by title and author. Nothing about

@@ -4,7 +4,7 @@ import { books, type CopyStatus, copies, type GenreColor, genres, loans, type Me
 import { unifyAuthors } from "@/lib/authors";
 import { normalizeIsbn } from "@/lib/isbn";
 import { type ParsedSeries, parseSeries, seriesKey } from "@/lib/series";
-import { changedFields } from "@/lib/provenance";
+import { changedFields, type FieldSource, readSources } from "@/lib/provenance";
 import { reconcileLibrary, resolveSeriesName } from "./reconcile";
 import { renumberCopies } from "./copy-numbers";
 import { inScope } from "./coteaching";
@@ -622,15 +622,33 @@ export async function fillSeries(db: Database, teacherId: string, bookId: string
   const raw = hint?.replace(/\s+/g, " ").trim();
   if (!raw) return;
   const parsed = parseSeries(raw === raw.toUpperCase() ? raw.toLowerCase() : raw);
-  if (parsed) await setSeriesIfMissing(db, teacherId, bookId, parsed);
+  if (parsed) await setSeriesIfMissing(db, teacherId, bookId, parsed, "gemini");
 }
 
-/** Sets a book's series only if it has none, in the library's own spelling of it. Returns what was set, or null. */
-export async function setSeriesIfMissing(db: Database, teacherId: string, bookId: string, series: ParsedSeries): Promise<ParsedSeries | null> {
+/**
+ * The one place a series is filled in for a book that has none, whoever found it (a catalogue,
+ * Gemini reading a spine or a title, a shelf photo). It settles the name to the library's own
+ * spelling, never replaces a series, leaves alone a series a teacher set or deliberately
+ * cleared (`field_sources`), and records who said it. Returns what was set, or null.
+ */
+export async function setSeriesIfMissing(
+  db: Database,
+  teacherId: string,
+  bookId: string,
+  series: ParsedSeries,
+  source: Exclude<FieldSource, "teacher"> = "catalogue",
+): Promise<ParsedSeries | null> {
+  const [book] = await db
+    .select({ fieldSources: books.fieldSources })
+    .from(books)
+    .where(and(eq(books.id, bookId), eq(books.teacherId, teacherId), isNull(books.series)));
+  if (!book) return null;
+  const sources = readSources(book.fieldSources);
+  if (sources.series === "teacher") return null;
   const name = await resolveSeriesName(db, teacherId, series.name);
   const updated = await db
     .update(books)
-    .set({ series: name, seriesNumber: series.number })
+    .set({ series: name, seriesNumber: series.number, fieldSources: { ...sources, series: source } })
     .where(and(eq(books.id, bookId), eq(books.teacherId, teacherId), isNull(books.series)))
     .returning({ id: books.id });
   return updated.length > 0 ? { name, number: series.number } : null;

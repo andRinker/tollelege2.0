@@ -25,7 +25,7 @@ export type LibraryHealth = {
   missing: { description: number; cover: number; publisher: number; year: number; pages: number; genre: number; tags: number; readingLevel: number | null; authors: number };
   /** Books with no ISBN, which only a title search can enrich. */
   noIsbn: number;
-  /** Books whose series, or authors, would be respelled by "Settle series and author spellings". */
+  /** Books whose series, or authors, would be respelled by "Fix everything". */
   unsettledSeries: number;
   unsettledAuthors: number;
   /**
